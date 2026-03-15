@@ -160,6 +160,12 @@ class ExchangeCollector(DataCollector):
         # ── 量价比：最近 1 根 K 线量 / 近 20 根均量 ──
         volume_ratio = self._calculate_volume_ratio(df["volume"])
 
+        # ── MACD：动量方向与金叉/死叉（ta 库计算） ──
+        macd_hist, macd_cross = self._calculate_macd(close)
+
+        # ── 布林带 %B：价格在带内的位置（ta 库计算） ──
+        bb_pct = self._calculate_bollinger(close)
+
         return TechnicalData(
             ma20=round(ma20, 2),
             ma60=round(ma60_val, 2) if ma60_val else None,
@@ -170,6 +176,9 @@ class ExchangeCollector(DataCollector):
             swing_lows=[round(v, 2) for v in swing_l[:5]],
             vwap=vwap_val,
             volume_ratio=volume_ratio,
+            macd_histogram=macd_hist,
+            macd_cross=macd_cross,
+            bb_percent=bb_pct,
         )
 
     @staticmethod
@@ -194,6 +203,62 @@ class ExchangeCollector(DataCollector):
         if avg_vol <= 0:
             return None
         return round(float(volume_series.iloc[-1] / avg_vol), 2)
+
+    @staticmethod
+    def _calculate_macd(close: pd.Series) -> tuple[float | None, str]:
+        """计算 MACD 柱状图值及金叉/死叉状态。
+
+        返回 (histogram, cross_type):
+        - histogram: 正=多头动量，负=空头动量
+        - cross_type: "golden"=金叉（MACD上穿信号线），
+                      "death"=死叉（MACD下穿信号线），
+                      "none"=无交叉
+        """
+        if len(close) < 35:  # MACD(12,26,9) 至少需要 ~34 根 K 线
+            return None, "none"
+
+        macd_indicator = ta.trend.MACD(close, window_slow=26, window_fast=12, window_sign=9)
+        hist = macd_indicator.macd_diff()
+
+        if hist.empty or len(hist) < 2:
+            return None, "none"
+
+        current = hist.iloc[-1]
+        previous = hist.iloc[-2]
+
+        if pd.isna(current) or pd.isna(previous):
+            return None, "none"
+
+        # 柱状图由负转正 = 金叉，由正转负 = 死叉
+        cross = "none"
+        if previous <= 0 < current:
+            cross = "golden"
+        elif previous >= 0 > current:
+            cross = "death"
+
+        return round(float(current), 2), cross
+
+    @staticmethod
+    def _calculate_bollinger(close: pd.Series) -> float | None:
+        """计算布林带 %B 指标。
+
+        %B = (价格 - 下轨) / (上轨 - 下轨)
+        >1 = 突破上轨（超买/强势突破）
+        <0 = 跌破下轨（超卖/弱势破位）
+        0.5 = 中轨附近
+        """
+        if len(close) < 20:
+            return None
+
+        bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+        upper = bb.bollinger_hband().iloc[-1]
+        lower = bb.bollinger_lband().iloc[-1]
+
+        if pd.isna(upper) or pd.isna(lower) or upper == lower:
+            return None
+
+        price = close.iloc[-1]
+        return round(float((price - lower) / (upper - lower)), 3)
 
     @staticmethod
     def _find_swing_points(arr, mode="high", window=3):

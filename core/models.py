@@ -49,6 +49,11 @@ class TechnicalData:
     # ── 量价分析（从现有 K 线纯计算，无需额外 API） ──
     vwap: float | None = None          # 成交量加权平均价
     volume_ratio: float | None = None  # 当前成交量 / 近期均量，>1.5 放量，<0.5 缩量
+    # ── MACD 动量（ta 库计算，零额外 API） ──
+    macd_histogram: float | None = None  # MACD 柱状图值，正=多头动量，负=空头动量
+    macd_cross: str = "none"             # "golden"=金叉, "death"=死叉, "none"=无交叉
+    # ── 布林带（ta 库计算，零额外 API） ──
+    bb_percent: float | None = None      # %B = (价格-下轨)/(上轨-下轨)，>1=突破上轨, <0=跌破下轨
 
 
 @dataclass(frozen=True)

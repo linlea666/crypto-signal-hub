@@ -1,11 +1,13 @@
 """技术面趋势评分因子。
 
-评估维度：
-- MA 均线排列与价格位置（±10 分）
-- RSI 超买超卖（±3 分）
-- K 线结构：高低点趋势（±2 分）
-- VWAP 位置：价格相对成交量加权价（±2 分）
-- 量价配合：放量/缩量对趋势的确认或背离（±3 分）
+7 个评估维度（总分 ±20，从现有 K 线纯计算，零额外 API）：
+- MA 均线排列与价格位置（±8 分）—— 趋势方向基础
+- RSI 超买超卖（±2 分）—— 动能极端修正
+- K 线结构：高低点趋势（±2 分）—— 价格结构确认
+- VWAP 位置（±2 分）—— 成交量加权公允价
+- 量价配合（±2 分）—— 趋势可信度
+- MACD 动量（±2 分）—— 金叉/死叉 + 零轴位置
+- 布林带位置（±2 分）—— 波动率与价格极端
 """
 
 from core.constants import Direction, FactorName
@@ -33,38 +35,38 @@ class TechnicalFactor(ScoreFactor):
         score = 0.0
         details_parts: list[str] = []
 
-        # ── 1. MA 趋势评分（±10 分）──
-        ma_direction = 0  # 记录 MA 判断的方向，供量价配合使用
+        # ── 1. MA 趋势评分（±8 分）──
+        ma_direction = 0
         if tech.ma20 and tech.ma60:
             if tech.ma20 > tech.ma60:
                 if price > tech.ma20:
-                    score += 10
+                    score += 8
                     ma_direction = 1
-                    details_parts.append("MA20>MA60且价格在上方(强多头+10)")
+                    details_parts.append("MA20>MA60且价格在上方(强多头+8)")
                 else:
-                    score += 5
+                    score += 4
                     ma_direction = 1
-                    details_parts.append("MA20>MA60但价格回落(弱多头+5)")
+                    details_parts.append("MA20>MA60但价格回落(弱多头+4)")
             else:
                 if price < tech.ma20:
-                    score -= 10
+                    score -= 8
                     ma_direction = -1
-                    details_parts.append("MA20<MA60且价格在下方(强空头-10)")
+                    details_parts.append("MA20<MA60且价格在下方(强空头-8)")
                 else:
-                    score -= 5
+                    score -= 4
                     ma_direction = -1
-                    details_parts.append("MA20<MA60但价格反弹(弱空头-5)")
+                    details_parts.append("MA20<MA60但价格反弹(弱空头-4)")
         else:
             details_parts.append("MA数据不足")
 
-        # ── 2. RSI 修正（±3 分）──
+        # ── 2. RSI 修正（±2 分）──
         if tech.rsi_4h is not None:
             if tech.rsi_4h > 80:
-                score -= 3
-                details_parts.append(f"RSI={tech.rsi_4h:.0f}(超买-3)")
+                score -= 2
+                details_parts.append(f"RSI={tech.rsi_4h:.0f}(超买-2)")
             elif tech.rsi_4h < 20:
-                score += 3
-                details_parts.append(f"RSI={tech.rsi_4h:.0f}(超卖+3)")
+                score += 2
+                details_parts.append(f"RSI={tech.rsi_4h:.0f}(超卖+2)")
             else:
                 details_parts.append(f"RSI={tech.rsi_4h:.0f}")
 
@@ -88,27 +90,58 @@ class TechnicalFactor(ScoreFactor):
             else:
                 details_parts.append("价格贴近VWAP")
 
-        # ── 5. 量价配合（±3 分）──
+        # ── 5. 量价配合（±2 分）──
         if tech.volume_ratio is not None:
             vr = tech.volume_ratio
-            if vr > 1.5:
-                # 放量：确认当前趋势方向
+            if vr > 1.5 and ma_direction != 0:
+                s = 2 * ma_direction
+                score += s
+                label = "多头" if ma_direction > 0 else "空头"
+                details_parts.append(f"放量{vr:.1f}x确认{label}({s:+d})")
+            elif vr < 0.5 and ma_direction != 0:
+                s = -1 * ma_direction  # 缩量削弱方向
+                score += s
+                label = "多头乏力" if ma_direction > 0 else "空头乏力"
+                details_parts.append(f"缩量{vr:.1f}x{label}({s:+d})")
+
+        # ── 6. MACD 动量（±2 分）──
+        if tech.macd_histogram is not None:
+            hist = tech.macd_histogram
+            cross = tech.macd_cross
+            if cross == "golden":
+                score += 2
+                details_parts.append(f"MACD金叉(柱状{hist:+.1f},+2)")
+            elif cross == "death":
+                score -= 2
+                details_parts.append(f"MACD死叉(柱状{hist:+.1f},-2)")
+            elif hist > 0:
+                score += 1
+                details_parts.append(f"MACD多头动量(柱状{hist:+.1f},+1)")
+            elif hist < 0:
+                score -= 1
+                details_parts.append(f"MACD空头动量(柱状{hist:+.1f},-1)")
+
+        # ── 7. 布林带位置（±2 分）──
+        if tech.bb_percent is not None:
+            bb = tech.bb_percent
+            if bb > 1.0:
+                # 突破上轨：强势突破 or 超买，结合趋势判断
                 if ma_direction > 0:
-                    score += 3
-                    details_parts.append(f"放量{vr:.1f}x确认多头(+3)")
-                elif ma_direction < 0:
-                    score -= 3
-                    details_parts.append(f"放量{vr:.1f}x确认空头(-3)")
-                else:
-                    details_parts.append(f"放量{vr:.1f}x(方向不明)")
-            elif vr < 0.5:
-                # 缩量：当前趋势可能衰竭，削弱方向得分
-                if ma_direction > 0:
-                    score -= 2
-                    details_parts.append(f"缩量{vr:.1f}x多头乏力(-2)")
-                elif ma_direction < 0:
                     score += 2
-                    details_parts.append(f"缩量{vr:.1f}x空头乏力(+2)")
+                    details_parts.append(f"突破布林上轨%B={bb:.2f}(强势+2)")
+                else:
+                    score -= 1
+                    details_parts.append(f"触及布林上轨%B={bb:.2f}(超买-1)")
+            elif bb < 0.0:
+                # 跌破下轨：弱势破位 or 超卖
+                if ma_direction < 0:
+                    score -= 2
+                    details_parts.append(f"跌破布林下轨%B={bb:.2f}(弱势-2)")
+                else:
+                    score += 1
+                    details_parts.append(f"触及布林下轨%B={bb:.2f}(超卖+1)")
+            elif 0.4 <= bb <= 0.6:
+                details_parts.append(f"布林中轨附近%B={bb:.2f}")
 
         score = max(-self._max, min(self._max, score))
         direction = Direction.BULLISH if score > 0 else (
