@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from config.schema import ScheduleConfig
 from core.constants import SignalStrength
