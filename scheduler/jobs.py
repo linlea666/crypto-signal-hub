@@ -163,11 +163,16 @@ class JobScheduler:
         logger.info("调度器已停止")
 
     async def run_now(self, symbol: str | None = None) -> dict | None:
-        """手动立即执行一次分析（Web 界面的"立即分析"按钮）"""
+        """手动立即执行一次分析（Web 界面的"立即分析"按钮）。
+
+        手动触发始终调用 AI，不受信号强度限制。
+        """
         symbols = [symbol] if symbol else self._config.general.symbols
         result = None
         for sym in symbols:
-            result = await self._analyze_symbol(sym, alert_type=AlertType.HOURLY_REPORT)
+            result = await self._analyze_symbol(
+                sym, alert_type=AlertType.HOURLY_REPORT, force_ai=True,
+            )
         return result
 
     # ── 定时任务实现 ──
@@ -379,8 +384,13 @@ class JobScheduler:
         symbol: str,
         alert_type: AlertType = AlertType.HOURLY_REPORT,
         skip_dispatch: bool = False,
+        force_ai: bool = False,
     ) -> dict | None:
-        """执行单个交易对的完整分析流程"""
+        """执行单个交易对的完整分析流程。
+
+        Args:
+            force_ai: 手动触发时为 True，强制调用 AI 不受信号强度限制
+        """
         try:
             logger.info("开始分析: %s", symbol)
 
@@ -390,11 +400,15 @@ class JobScheduler:
             # 2. 评分
             report = self._scorer.evaluate(snapshot)
 
-            # 3. AI 分析（仅中等以上信号或日报触发）
-            if (
-                report.signal_strength in (SignalStrength.STRONG, SignalStrength.MODERATE)
+            # 3. AI 分析
+            #    自动周期：仅中等以上信号调用（节省 Token）
+            #    手动触发 / 日报：始终调用
+            should_call_ai = (
+                force_ai
                 or alert_type == AlertType.DAILY_REPORT
-            ):
+                or report.signal_strength in (SignalStrength.STRONG, SignalStrength.MODERATE)
+            )
+            if should_call_ai:
                 from analyzer.reporter import build_score_summary, build_trade_summary
                 summary = build_score_summary(report)
                 trade_summary = build_trade_summary(report)
