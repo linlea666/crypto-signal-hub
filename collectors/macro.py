@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 import httpx
 import yfinance as yf
@@ -33,18 +35,26 @@ _TICKER_MAP = {
 
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 
+# 缓存有效期（秒）：Yahoo 数据刷新慢，缓存 5 分钟避免 429
+_YAHOO_CACHE_TTL = 300
+
 
 class MacroCollector(DataCollector):
     """宏观经济数据采集器"""
+
+    def __init__(self):
+        self._yahoo_cache: dict[str, dict] = {}
+        self._yahoo_cache_ts: float = 0.0
 
     @property
     def name(self) -> str:
         return "macro"
 
     async def collect(self, symbol: str, snapshot_data: dict) -> dict:
-        nasdaq = await self._fetch_yahoo_quote("nasdaq")
-        dxy = await self._fetch_yahoo_quote("dxy")
-        vix = await self._fetch_yahoo_quote("vix")
+        yahoo_data = await self._fetch_all_yahoo()
+        nasdaq = yahoo_data.get("nasdaq", {})
+        dxy = yahoo_data.get("dxy", {})
+        vix = yahoo_data.get("vix", {})
         fg = await self._fetch_fear_greed()
         etf_flow = await self._fetch_etf_flow()
 
@@ -61,24 +71,51 @@ class MacroCollector(DataCollector):
         )
         return snapshot_data
 
-    async def _fetch_yahoo_quote(self, key: str) -> dict:
-        """通过 yfinance 获取行情快照"""
+    async def _fetch_all_yahoo(self) -> dict[str, dict]:
+        """批量获取 Yahoo 数据，带缓存避免 429"""
+        now = time.monotonic()
+        if self._yahoo_cache and (now - self._yahoo_cache_ts) < _YAHOO_CACHE_TTL:
+            logger.debug("使用 Yahoo 缓存数据（%.0f 秒前）", now - self._yahoo_cache_ts)
+            return self._yahoo_cache
+
+        results: dict[str, dict] = {}
+        for key in ("nasdaq", "dxy", "vix"):
+            data = await self._fetch_yahoo_quote(key)
+            results[key] = data
+            await asyncio.sleep(0.5)
+
+        if any(results.values()):
+            self._yahoo_cache = results
+            self._yahoo_cache_ts = now
+
+        return results
+
+    async def _fetch_yahoo_quote(self, key: str, retries: int = 2) -> dict:
+        """通过 yfinance 获取行情快照，带重试"""
         ticker_symbol = _TICKER_MAP.get(key)
         if not ticker_symbol:
             return {}
 
-        try:
-            ticker = yf.Ticker(ticker_symbol)
-            info = ticker.fast_info
-            price = float(info.last_price) if hasattr(info, "last_price") else None
-            prev = float(info.previous_close) if hasattr(info, "previous_close") else None
-            change_pct = 0.0
-            if price and prev and prev > 0:
-                change_pct = round(((price - prev) / prev) * 100, 2)
-            return {"price": round(price, 2) if price else None, "change_pct": change_pct}
-        except Exception as e:
-            logger.warning("yfinance 获取 %s 失败: %s", key, e)
-            return {}
+        for attempt in range(retries + 1):
+            try:
+                ticker = yf.Ticker(ticker_symbol)
+                info = ticker.fast_info
+                price = float(info.last_price) if hasattr(info, "last_price") else None
+                prev = float(info.previous_close) if hasattr(info, "previous_close") else None
+                change_pct = 0.0
+                if price and prev and prev > 0:
+                    change_pct = round(((price - prev) / prev) * 100, 2)
+                return {"price": round(price, 2) if price else None, "change_pct": change_pct}
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg and attempt < retries:
+                    wait = 2 ** (attempt + 1)
+                    logger.info("Yahoo %s 被限流，%d 秒后重试...", key, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("yfinance 获取 %s 失败: %s", key, e)
+                return {}
+        return {}
 
     async def _fetch_fear_greed(self) -> dict:
         """获取加密恐惧贪婪指数"""
@@ -98,5 +135,4 @@ class MacroCollector(DataCollector):
 
     async def _fetch_etf_flow(self) -> dict:
         """获取 BTC ETF 资金流（预留接口，后续对接 SoSoValue 等数据源）"""
-        # Phase 2: 实现 SoSoValue / Farside 数据采集
         return {"flow_usd": None, "trend": "unknown"}

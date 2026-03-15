@@ -186,8 +186,15 @@ class HealthChecker:
             start = time.monotonic()
             async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
                 resp = await client.get(
-                    "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=1d&interval=1d"
+                    "https://query2.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=1d&interval=1d"
                 )
+                if resp.status_code == 429:
+                    return ProbeResult(
+                        name="美股数据 (Yahoo)",
+                        status=HealthStatus.DEGRADED,
+                        message="限流中，数据已缓存可用",
+                        last_check=now,
+                    )
                 resp.raise_for_status()
             latency = (time.monotonic() - start) * 1000
             status = HealthStatus.OK if latency < SLOW_THRESHOLD_MS else HealthStatus.DEGRADED

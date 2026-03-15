@@ -96,7 +96,13 @@ class OptionsCollector(DataCollector):
         total_put_oi = 0.0
 
         for opt in nearest_options:
-            strike = float(opt.get("strike", 0))
+            raw_strike = opt.get("strike")
+            if raw_strike is None:
+                continue
+            try:
+                strike = float(raw_strike)
+            except (TypeError, ValueError):
+                continue
             opt_type = opt.get("optionType", "")
             opt_symbol = opt.get("symbol", "")
             if not strike or not opt_symbol:
@@ -104,7 +110,7 @@ class OptionsCollector(DataCollector):
 
             try:
                 oi_data = await ex.fetch_open_interest(opt_symbol)
-                oi_val = float(oi_data.get("openInterest", 0) or 0)
+                oi_val = float(oi_data.get("openInterest") or 0)
                 if opt_type == "call":
                     call_oi[strike] = oi_val
                     total_call_oi += oi_val
