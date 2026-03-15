@@ -58,6 +58,11 @@ class AIReporter(AIProvider):
     def enabled(self) -> bool:
         return self._config.enabled and bool(self._config.api_key)
 
+    def update_config(self, config: AIConfig) -> None:
+        """热更新配置，重置客户端以使用新的 API Key / Base URL"""
+        self._config = config
+        self._client = None
+
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
             self._client = AsyncOpenAI(

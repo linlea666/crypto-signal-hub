@@ -127,6 +127,7 @@ async def save_config(request: Request):
     cm = request.app.state.config_manager
     try:
         cm.update(**body)
+        _reload_all_services(request.app)
         return {"success": True}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
@@ -140,9 +141,27 @@ async def complete_setup(request: Request):
     try:
         body["setup_completed"] = True
         cm.update(**body)
+        _reload_all_services(request.app)
         return {"success": True}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+def _reload_all_services(app) -> None:
+    """配置变更后，将新配置传播到所有持有配置引用的服务"""
+    config = app.state.config_manager.config
+
+    scheduler = app.state.job_scheduler
+    if scheduler:
+        scheduler.reload_config(config)
+
+    health_checker = app.state.health_checker
+    if health_checker:
+        health_checker.update_config(
+            exchange_config=config.exchanges,
+            email_config=config.email,
+            ai_config=config.ai,
+        )
 
 
 @router.post("/test/email")

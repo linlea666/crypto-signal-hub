@@ -87,6 +87,20 @@ class HealthChecker:
     def last_report(self) -> HealthReport | None:
         return self._last_report
 
+    def update_config(
+        self,
+        exchange_config: ExchangeConfig | None = None,
+        email_config: EmailConfig | None = None,
+        ai_config: AIConfig | None = None,
+    ) -> None:
+        """热更新配置引用，供 Web 配置保存后调用"""
+        if exchange_config is not None:
+            self._exchange_config = exchange_config
+        if email_config is not None:
+            self._email_config = email_config
+        if ai_config is not None:
+            self._ai_config = ai_config
+
     async def check_all(self) -> HealthReport:
         """并行执行所有探针，汇总健康报告"""
         probes = await asyncio.gather(

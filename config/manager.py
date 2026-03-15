@@ -16,8 +16,8 @@ from config.schema import AppConfig
 
 logger = logging.getLogger(__name__)
 
-# 配置文件默认路径（项目根目录下）
-DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+# 配置文件默认路径（data 目录下，确保 Docker 卷挂载时持久化）
+DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "data" / "config.yaml"
 
 
 class ConfigManager:

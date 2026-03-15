@@ -39,6 +39,12 @@ class NotificationDispatcher:
         self._channels.append(channel)
         logger.info("注册通知渠道: %s (enabled=%s)", channel.name, channel.enabled)
 
+    def update_channel_configs(self, **configs_by_name) -> None:
+        """按渠道名更新配置，如 update_channel_configs(email=new_email_cfg)"""
+        for channel in self._channels:
+            if channel.name in configs_by_name and hasattr(channel, "update_config"):
+                channel.update_config(configs_by_name[channel.name])
+
     async def dispatch(self, report: SignalReport) -> None:
         """决定是否发送并分发到所有渠道"""
         should_send = self._throttle.should_send(report)

@@ -63,6 +63,13 @@ class JobScheduler:
     def latest_reports(self) -> dict[str, dict]:
         return dict(self._latest_reports)
 
+    def reload_config(self, config: AppConfig) -> None:
+        """热重载配置，级联更新所有子服务"""
+        self._config = config
+        self._ai_reporter.update_config(config.ai)
+        self._dispatcher.update_channel_configs(email=config.email)
+        logger.info("调度器配置已热重载")
+
     def setup(self) -> None:
         """配置所有定时任务"""
         interval = self._config.general.analysis_interval_minutes

@@ -28,6 +28,10 @@ class EmailNotifier(Notifier):
     def name(self) -> str:
         return "email"
 
+    def update_config(self, config: EmailConfig) -> None:
+        """热更新配置"""
+        self._config = config
+
     @property
     def enabled(self) -> bool:
         return (
