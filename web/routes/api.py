@@ -78,6 +78,13 @@ def _serialize_health(report) -> dict:
     }
 
 
+@router.get("/latest")
+async def all_latest_reports(request: Request):
+    """获取所有交易对的最新报告"""
+    scheduler = request.app.state.job_scheduler
+    return scheduler.latest_reports
+
+
 @router.get("/latest/{symbol}")
 async def latest_report(request: Request, symbol: str):
     """获取指定交易对的最新报告"""
@@ -92,10 +99,10 @@ async def latest_report(request: Request, symbol: str):
 
 
 @router.get("/reports")
-async def list_reports(request: Request, limit: int = 50, offset: int = 0):
-    """分页获取历史报告"""
+async def list_reports(request: Request, limit: int = 50, offset: int = 0, symbol: str = ""):
+    """分页获取历史报告，支持按交易对筛选"""
     db = request.app.state.db
-    return db.get_recent_reports(limit=limit, offset=offset)
+    return db.get_recent_reports(limit=limit, offset=offset, symbol=symbol or None)
 
 
 @router.get("/report/{report_id}")
@@ -110,10 +117,17 @@ async def report_detail(request: Request, report_id: str):
 
 @router.post("/analyze")
 async def trigger_analysis(request: Request):
-    """手动触发一次分析"""
+    """手动触发一次分析，支持指定交易对"""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
     scheduler = request.app.state.job_scheduler
     config = request.app.state.config_manager.config
-    symbol = config.general.symbols[0] if config.general.symbols else "BTC/USDT"
+    symbol = body.get("symbol") or (
+        config.general.symbols[0] if config.general.symbols else "BTC/USDT"
+    )
     result = await scheduler.run_now(symbol)
     if result:
         return {"success": True, "report": result}

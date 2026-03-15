@@ -1,202 +1,317 @@
 {% extends "base.html" %}
-{% block title %}数据大屏 - CryptoSignal Hub{% endblock %}
+{% block title %}大屏 — CryptoSignal Hub{% endblock %}
+
+{% block coin_tabs %}
+<div class="coin-tabs">
+    {% for sym in symbols %}
+    <a href="/?symbol={{ sym }}" class="coin-tab {% if sym == active_symbol %}active{% endif %}">
+        {{ sym.split('/')[0] }}
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="dashboard">
-    <!-- 顶部概览卡片 -->
-    <div class="card overview-card">
-        {% if report %}
-        <div class="overview-left">
-            <div class="symbol-name">{{ report.symbol }}</div>
-            <div class="price">${{ "%.2f"|format(report.snapshot.price.current) }}</div>
-            <div class="timestamp">{{ report.timestamp }}</div>
-        </div>
-        <div class="overview-right">
-            <div class="score {% if report.total_score > 0 %}bullish{% elif report.total_score < 0 %}bearish{% else %}neutral{% endif %}">
-                {{ "%+.0f"|format(report.total_score) }}/{{ "%.0f"|format(report.max_score) }}
-                <span class="direction-label">
-                    {% if report.direction == 'bullish' %}偏多{% elif report.direction == 'bearish' %}偏空{% else %}中性{% endif %}
-                </span>
-            </div>
-            <div class="confidence">信心度 {{ "%.0f"|format(report.confidence) }}%</div>
-            <div class="strength-badge strength-{{ report.signal_strength }}">
-                {{ report.signal_strength }}
-            </div>
-        </div>
-        {% else %}
-        <div class="no-data">
-            <p>暂无数据，点击下方按钮开始首次分析</p>
-        </div>
-        {% endif %}
-        <button class="btn btn-primary" onclick="triggerAnalysis()">🔄 立即分析</button>
-    </div>
+{% if report %}
+{% set snap = report.get('snapshot', {}) %}
+{% set price = snap.get('price', {}) %}
+{% set scores = report.get('scores', []) %}
+{% set levels = report.get('levels', {}) %}
+{% set macro = snap.get('macro', {}) %}
+{% set derivs = snap.get('derivatives', {}) %}
+{% set funding = derivs.get('funding_rate', {}) %}
+{% set oi = derivs.get('open_interest', {}) %}
+{% set ls = derivs.get('long_short', {}) %}
+{% set opts = snap.get('options') or {} %}
 
-    {% if report and report.scores %}
-    <!-- 多维度信号面板 -->
+<!-- Row 1: Overview -->
+<div class="overview-grid">
+    <!-- Price Card -->
     <div class="card">
-        <h3 class="card-title">📊 多维度信号面板</h3>
-        <div class="factors-grid">
-            {% for score in report.scores %}
-            <div class="factor-row">
-                <span class="factor-name">{{ score.name }}</span>
-                <div class="factor-bar-container">
-                    <div class="factor-bar {% if score.score > 0 %}bar-bullish{% elif score.score < 0 %}bar-bearish{% else %}bar-neutral{% endif %}"
-                         style="width: {{ (score.score|abs / score.max_score * 100)|int }}%">
-                    </div>
-                </div>
-                <span class="factor-score {% if score.score > 0 %}bullish{% elif score.score < 0 %}bearish{% endif %}">
-                    {{ "%+.0f"|format(score.score) }}
-                </span>
-                <span class="factor-emoji">
-                    {% if score.score > 0 %}📈{% elif score.score < 0 %}📉{% else %}➖{% endif %}
-                </span>
-            </div>
-            {% endfor %}
+        <div class="card-title">价格</div>
+        <div class="price-current mono" id="price-value">${{ "%.2f"|format(price.get('current', 0)) }}</div>
+        {% set chg = price.get('change_pct_24h', 0) %}
+        <div class="price-change {{ 'positive' if chg >= 0 else 'negative' }}">
+            {{ "%.2f"|format(chg) }}% <span class="price-meta">24h</span>
         </div>
+        <div class="price-meta" style="margin-top:8px">
+            H ${{ "%.0f"|format(price.get('high_24h', 0)) }} · L ${{ "%.0f"|format(price.get('low_24h', 0)) }}
+        </div>
+        <div class="price-meta">Vol ${{ "%.0f"|format(price.get('volume_24h', 0) / 1000000) }}M</div>
     </div>
 
-    <div class="grid-2col">
-        <!-- 关键价位 -->
-        <div class="card">
-            <h3 class="card-title">📍 关键价位</h3>
-            {% if report.levels.resistances %}
-            <div class="levels-section">
-                <div class="level-label">阻力位</div>
-                {% for lv in report.levels.resistances[:3] %}
-                <div class="level-item resistance">
-                    🔴 {{ "{:,.0f}".format(lv.price) }}
-                    <span class="level-source">{{ lv.source }}</span>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-            <div class="current-price-marker">
-                ── {{ "{:,.2f}".format(report.snapshot.price.current) }} 当前 ──
-            </div>
-            {% if report.levels.supports %}
-            <div class="levels-section">
-                <div class="level-label">支撑位</div>
-                {% for lv in report.levels.supports[:3] %}
-                <div class="level-item support">
-                    🟢 {{ "{:,.0f}".format(lv.price) }}
-                    <span class="level-source">{{ lv.source }}</span>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
+    <!-- Score Gauge -->
+    <div class="card" style="text-align:center">
+        <div class="card-title">综合评分</div>
+        <div class="gauge-container">
+            <canvas id="scoreGauge" width="180" height="110"
+                    data-score="{{ report.get('total_score', 0) }}"
+                    data-max="{{ report.get('max_score', 120) }}"></canvas>
         </div>
-
-        <!-- AI 分析 -->
-        <div class="card">
-            <h3 class="card-title">🤖 AI 分析</h3>
-            <div class="ai-content">
-                {{ report.ai_analysis|default('AI 分析尚未生成', true)|replace('\n', '<br>')|safe }}
-            </div>
-        </div>
-    </div>
-
-    <!-- 数据明细 -->
-    <div class="card">
-        <h3 class="card-title">📋 评分依据明细</h3>
-        <div class="details-grid">
-            {% for score in report.scores %}
-            <div class="detail-item">
-                <span class="detail-name">{{ score.name }}</span>
-                <span class="detail-text">{{ score.details }}</span>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- 服务健康状态 -->
-    <div class="card">
-        <h3 class="card-title">
-            🏥 服务健康状态
-            {% if health %}
-            <span class="health-overall health-{{ health.overall.value }}">
-                {{ health.ok_count }}/{{ health.total_count }} 正常
+        <div class="gauge-label">
+            <span class="text-{{ report.get('direction', 'neutral') }}">
+                {{ '偏多' if report.get('direction') == 'bullish' else ('偏空' if report.get('direction') == 'bearish' else '中性') }}
             </span>
-            {% endif %}
-            <button class="btn btn-outline btn-sm" onclick="refreshHealth()" id="refreshHealthBtn" style="float:right;">🔄 刷新</button>
-        </h3>
-        <div class="health-grid" id="healthGrid">
-            {% if health and health.probes %}
-                {% for p in health.probes %}
-                <div class="health-probe health-probe-{{ p.status.value }}">
-                    <div class="probe-status">
-                        {% if p.status.value == 'ok' %}🟢{% elif p.status.value == 'degraded' %}🟡{% elif p.status.value == 'error' %}🔴{% else %}⚪{% endif %}
-                    </div>
-                    <div class="probe-info">
-                        <div class="probe-name">{{ p.name }}</div>
-                        <div class="probe-message">{{ p.message }}</div>
-                    </div>
-                    {% if p.latency_ms > 0 %}
-                    <div class="probe-latency">{{ "%.0f"|format(p.latency_ms) }}ms</div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="no-data" style="padding:12px;">健康检查尚未执行，点击刷新</div>
-            {% endif %}
         </div>
-        {% if health %}
-        <div class="health-footer">上次检查: {{ health.checked_at[:19] }}</div>
-        {% endif %}
     </div>
 
-    <!-- 系统状态 -->
+    <!-- Signal Strength + Confidence -->
+    <div class="card" style="text-align:center">
+        <div class="card-title">信号强度</div>
+        {% set strength = report.get('signal_strength', 'weak') %}
+        <div class="signal-badge {{ strength }}" style="margin:16px auto">{{ strength|upper }}</div>
+        <div class="confidence-ring" style="--confidence: {{ report.get('confidence', 0) }}">
+            <div class="confidence-value mono">{{ "%.0f"|format(report.get('confidence', 0)) }}%</div>
+            <div class="price-meta">信心度</div>
+        </div>
+    </div>
+
+    <!-- Fear & Greed -->
+    <div class="card" style="text-align:center">
+        <div class="card-title">恐惧贪婪指数</div>
+        <div style="width:140px;height:140px;margin:8px auto">
+            <canvas id="fearGreedGauge" width="140" height="140"
+                    data-value="{{ macro.get('fear_greed_value', 50) or 50 }}"></canvas>
+        </div>
+        <div class="price-meta">{{ macro.get('fear_greed_label', 'N/A') }}</div>
+    </div>
+</div>
+
+<!-- Row 2: Analysis -->
+<div class="analysis-grid">
+    <!-- Radar Chart -->
     <div class="card">
-        <h3 class="card-title">🖥️ 运行状态</h3>
-        <div class="status-grid">
-            {% for name, status in collector_status.items() %}
-            <div class="status-item">
-                <span class="status-dot {% if status.ok %}dot-ok{% else %}dot-error{% endif %}"></span>
-                {{ name }}
-                <span class="status-time">{{ status.last_run or '未运行' }}</span>
+        <div class="card-title">七维分析</div>
+        <div style="padding:8px">
+            <canvas id="radarChart" width="300" height="300"
+                    data-scores='{{ scores | tojson }}'></canvas>
+        </div>
+    </div>
+
+    <!-- Factor Details + Key Levels -->
+    <div class="card">
+        <div class="card-title">评分明细</div>
+        <div class="factor-list">
+            {% for fs in scores %}
+            {% set pct = ((fs.score|abs / fs.max_score) * 50)|int if fs.max_score else 0 %}
+            <div class="factor-row">
+                <span class="factor-name">{{ fs.name }}</span>
+                <div class="factor-bar-track">
+                    {% if fs.score >= 0 %}
+                    <div class="factor-bar-fill positive" style="width:{{ pct }}%;left:50%"></div>
+                    {% else %}
+                    <div class="factor-bar-fill negative" style="width:{{ pct }}%;right:50%"></div>
+                    {% endif %}
+                    <div class="factor-bar-center"></div>
+                </div>
+                <span class="factor-score mono {{ 'text-bullish' if fs.score > 0 else ('text-bearish' if fs.score < 0 else '') }}">
+                    {{ "%+.0f"|format(fs.score) }}
+                </span>
             </div>
             {% endfor %}
-            <div class="status-item">
-                <span class="status-dot dot-ok"></span>
-                今日邮件: {{ emails_today }}/{{ config.schedule.max_daily_emails }}
+        </div>
+
+        <div class="card-title" style="margin-top:20px">关键价位</div>
+        <div class="levels-grid">
+            <div>
+                <div class="price-meta" style="color:var(--green);margin-bottom:6px">支撑位</div>
+                {% for lv in levels.get('supports', [])[:3] %}
+                <div class="level-item">
+                    <span class="level-price mono">${{ "%.0f"|format(lv.price) }}</span>
+                    <span class="price-meta">{{ lv.source }}</span>
+                </div>
+                {% else %}
+                <div class="price-meta">暂无</div>
+                {% endfor %}
             </div>
-            <div class="status-item">
-                <a href="/logs" class="nav-link" style="padding:0;">📋 查看日志</a>
+            <div>
+                <div class="price-meta" style="color:var(--red);margin-bottom:6px">阻力位</div>
+                {% for lv in levels.get('resistances', [])[:3] %}
+                <div class="level-item">
+                    <span class="level-price mono">${{ "%.0f"|format(lv.price) }}</span>
+                    <span class="price-meta">{{ lv.source }}</span>
+                </div>
+                {% else %}
+                <div class="price-meta">暂无</div>
+                {% endfor %}
             </div>
         </div>
     </div>
 
-    <!-- 历史信号简表 -->
-    {% if reports_list %}
+    <!-- AI Analysis -->
     <div class="card">
-        <h3 class="card-title">📈 近期信号</h3>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>时间</th>
-                    <th>方向</th>
-                    <th>评分</th>
-                    <th>信心度</th>
-                    <th>强度</th>
-                    <th>已推送</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in reports_list[:10] %}
-                <tr>
-                    <td>{{ r.timestamp[:16] }}</td>
-                    <td class="{{ r.direction }}">
-                        {% if r.direction == 'bullish' %}📈多{% elif r.direction == 'bearish' %}📉空{% else %}➖{% endif %}
-                    </td>
-                    <td>{{ "%+.0f"|format(r.total_score) }}/{{ "%.0f"|format(r.max_score) }}</td>
-                    <td>{{ "%.0f"|format(r.confidence) }}%</td>
-                    <td><span class="strength-badge strength-{{ r.signal_strength }}">{{ r.signal_strength }}</span></td>
-                    <td>{{ '✅' if r.email_sent else '—' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="card-title">AI 分析</div>
+        <div class="ai-panel">
+            <div class="ai-content">
+                {% if report.get('ai_analysis') %}
+                {{ report.ai_analysis | replace('\n', '<br>') | safe }}
+                {% else %}
+                <span class="price-meta">暂无 AI 分析（信号较弱或 AI 未配置）</span>
+                {% endif %}
+            </div>
+        </div>
+        {% if report.get('ai_analysis') %}
+        <div class="price-meta" style="margin-top:12px;text-align:right">
+            {{ config.ai.provider }} / {{ config.ai.model }}
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
+
+<!-- Row 3: Market Data -->
+<div class="market-grid">
+    <!-- Derivatives -->
+    <div class="card">
+        <div class="card-title">衍生品数据</div>
+        <div class="metric-grid">
+            <div class="metric-item {{ 'metric-alert' if funding.get('level', 'normal') != 'normal' else '' }}">
+                <div class="metric-label">资金费率</div>
+                <div class="metric-value mono {{ 'text-bearish' if (funding.get('average', 0) or 0) > 0.01 else ('text-bullish' if (funding.get('average', 0) or 0) < -0.01 else '') }}">
+                    {{ "%.4f"|format(funding.get('average', 0) or 0) }}%
+                </div>
+                <div class="metric-label">{{ funding.get('level', 'normal') }}</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">持仓量变化</div>
+                <div class="metric-value mono">{{ "%.1f"|format(oi.get('change_pct_24h', 0) or 0) }}%</div>
+                <div class="metric-label">24h</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">多空比(账户)</div>
+                <div class="metric-value mono">{{ "%.2f"|format(ls.get('account_ratio', 1) or 1) }}</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">Taker买卖比</div>
+                <div class="metric-value mono">{{ "%.2f"|format(ls.get('taker_buy_sell_ratio', 1) or 1) }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Options -->
+    <div class="card">
+        <div class="card-title">期权数据</div>
+        <div class="metric-grid">
+            <div class="metric-item">
+                <div class="metric-label">Max Pain</div>
+                <div class="metric-value mono">
+                    {% if opts.get('max_pain') %}${{ "%.0f"|format(opts.max_pain) }}{% else %}N/A{% endif %}
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">PCR</div>
+                <div class="metric-value mono {{ 'text-bullish' if (opts.get('put_call_ratio', 1) or 1) > 1.2 else ('text-bearish' if (opts.get('put_call_ratio', 1) or 1) < 0.8 else '') }}">
+                    {{ "%.2f"|format(opts.get('put_call_ratio', 1) or 1) }}
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">IV Rank</div>
+                <div class="metric-value mono">{{ "%.0f"|format(opts.get('iv_rank', 50) or 50) }}</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">最近到期</div>
+                <div class="metric-value" style="font-size:13px">{{ opts.get('nearest_expiry', 'N/A')[:10] }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Macro -->
+    <div class="card">
+        <div class="card-title">宏观指标</div>
+        <div class="metric-grid">
+            <div class="metric-item">
+                <div class="metric-label">纳斯达克</div>
+                <div class="metric-value mono">{{ "%.0f"|format(macro.get('nasdaq_price', 0) or 0) }}</div>
+                {% set nchg = macro.get('nasdaq_change_pct', 0) or 0 %}
+                <div class="metric-change {{ 'positive' if nchg >= 0 else 'negative' }}">{{ "%.2f"|format(nchg) }}%</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">美元指数</div>
+                <div class="metric-value mono">{{ "%.1f"|format(macro.get('dxy_price', 0) or 0) }}</div>
+                {% set dchg = macro.get('dxy_change_pct', 0) or 0 %}
+                <div class="metric-change {{ 'positive' if dchg >= 0 else 'negative' }}">{{ "%.2f"|format(dchg) }}%</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">VIX</div>
+                <div class="metric-value mono {{ 'text-bearish' if (macro.get('vix_value', 0) or 0) > 25 else '' }}">
+                    {{ "%.1f"|format(macro.get('vix_value', 0) or 0) }}
+                </div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">ETF 流向</div>
+                <div class="metric-value" style="font-size:13px">{{ macro.get('btc_etf_flow_3d_trend', 'N/A') }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 4: Timeline + Health -->
+<div class="bottom-grid">
+    <!-- Signal Timeline -->
+    <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>近期信号</span>
+            <button class="btn-primary" onclick="triggerAnalysis('{{ active_symbol }}')">
+                分析 {{ active_symbol.split('/')[0] }}
+            </button>
+        </div>
+        <div class="timeline-scroll">
+            {% for r in reports_list %}
+            <div class="timeline-item">
+                <div class="timeline-dot {{ r.direction }}"></div>
+                <div class="mono" style="font-size:13px;color:{{ '#10b981' if r.direction == 'bullish' else ('#ef4444' if r.direction == 'bearish' else '#94a3b8') }}">
+                    {{ "%+.0f"|format(r.total_score) }}
+                </div>
+                <div class="price-meta">{{ r.symbol.split('/')[0] }}</div>
+                <div class="price-meta">{{ r.timestamp[11:16] if r.timestamp|length > 16 else '' }}</div>
+            </div>
+            {% else %}
+            <div class="price-meta" style="padding:20px">暂无数据，点击上方按钮开始首次分析</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Health -->
+    <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>服务状态
+                {% if health %}
+                <span class="signal-badge {% if health.ok_count == health.total_count %}moderate{% else %}weak{% endif %}" style="font-size:10px;padding:2px 8px;margin-left:8px">
+                    {{ health.ok_count }}/{{ health.total_count }}
+                </span>
+                {% endif %}
+            </span>
+            <button class="btn-outline" onclick="refreshHealth()" style="font-size:11px;padding:4px 12px">刷新</button>
+        </div>
+        <div class="health-bar" id="health-bar">
+            {% if health %}
+            {% for p in health.probes %}
+            <div class="health-probe">
+                <span class="health-dot {{ p.status.value if p.status is not string else p.status }}"></span>
+                <span class="health-probe-name">{{ p.name }}</span>
+                {% if p.latency_ms %}
+                <span class="mono price-meta">{{ "%.0f"|format(p.latency_ms) }}ms</span>
+                {% else %}
+                <span class="price-meta">{{ p.message[:20] }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+        <div class="price-meta" style="margin-top:8px;text-align:right">
+            {% if health %}{{ health.checked_at[:19] if health.checked_at|length > 19 else health.checked_at }}{% endif %}
+        </div>
+    </div>
+</div>
+
+{% else %}
+<!-- No data state -->
+<div style="text-align:center;padding:80px 20px">
+    <div style="font-size:48px;margin-bottom:16px;opacity:0.3">◈</div>
+    <div style="font-size:18px;color:var(--text-primary);margin-bottom:8px">暂无数据</div>
+    <div class="price-meta" style="margin-bottom:24px">点击下方按钮开始首次分析</div>
+    <button class="btn-primary" onclick="triggerAnalysis('{{ active_symbol }}')" style="font-size:15px;padding:12px 32px">
+        分析 {{ active_symbol }}
+    </button>
+</div>
+{% endif %}
 {% endblock %}

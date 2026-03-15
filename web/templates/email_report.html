@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+<body style="margin:0;padding:0;background:#0a0e1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0e1a;padding:20px 0">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#111827;border-radius:12px;border:1px solid #1e293b;overflow:hidden">
+
+  <!-- Header -->
+  <tr><td style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:24px 30px;text-align:center">
+    <div style="font-size:20px;font-weight:700;color:#00d4ff;letter-spacing:1px">CryptoSignal Hub</div>
+    <div style="font-size:13px;color:#64748b;margin-top:4px">{{ symbol }} 市场分析报告</div>
+  </td></tr>
+
+  <!-- Price + Score Overview -->
+  <tr><td style="padding:24px 30px 0">
+    <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td width="50%" style="vertical-align:top">
+        <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px">当前价格</div>
+        <div style="font-size:28px;font-weight:700;color:#e2e8f0;margin:4px 0;font-family:'Courier New',monospace">
+          ${{ "%.2f"|format(snapshot.price.current) if snapshot else "N/A" }}
+        </div>
+        <div style="font-size:13px;color:{{ '#10b981' if (snapshot and snapshot.price.change_pct_24h > 0) else '#ef4444' }}">
+          {{ "%.2f"|format(snapshot.price.change_pct_24h) if snapshot else "0" }}% (24h)
+        </div>
+      </td>
+      <td width="50%" style="vertical-align:top;text-align:right">
+        <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px">综合评分</div>
+        <div style="font-size:28px;font-weight:700;color:{{ '#10b981' if direction == 'bullish' else ('#ef4444' if direction == 'bearish' else '#94a3b8') }};margin:4px 0">
+          {{ score_display }}
+        </div>
+        <div style="font-size:13px;color:#94a3b8">
+          {{ direction_label }} · 信心度 {{ "%.0f"|format(confidence) }}%
+        </div>
+      </td>
+    </tr>
+    </table>
+  </td></tr>
+
+  <!-- Signal Strength Badge -->
+  <tr><td style="padding:16px 30px">
+    {% set badge_color = '#ef4444' if signal_strength == 'strong' else ('#f59e0b' if signal_strength == 'moderate' else '#64748b') %}
+    <div style="display:inline-block;padding:6px 16px;border-radius:20px;background:{{ badge_color }}20;border:1px solid {{ badge_color }};color:{{ badge_color }};font-size:12px;font-weight:600">
+      {{ signal_strength|upper }} SIGNAL
+    </div>
+  </td></tr>
+
+  <!-- Divider -->
+  <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
+
+  <!-- Factor Scores -->
+  <tr><td style="padding:20px 30px">
+    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">各维度评分</div>
+    {% for fs in scores %}
+    {% set bar_pct = ((fs.score|abs / fs.max_score) * 50)|int if fs.max_score else 0 %}
+    {% set bar_color = '#10b981' if fs.score > 0 else ('#ef4444' if fs.score < 0 else '#64748b') %}
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px">
+    <tr>
+      <td width="100" style="font-size:12px;color:#94a3b8;padding:4px 0">{{ fs.name }}</td>
+      <td style="padding:4px 8px">
+        <div style="height:6px;background:#1e293b;border-radius:3px;position:relative">
+          <div style="height:6px;background:{{ bar_color }};border-radius:3px;width:{{ bar_pct }}%;{% if fs.score < 0 %}margin-left:{{ 50 - bar_pct }}%{% endif %}"></div>
+        </div>
+      </td>
+      <td width="60" style="font-size:12px;color:{{ bar_color }};text-align:right;font-weight:600;font-family:'Courier New',monospace">
+        {{ "%+.0f"|format(fs.score) }}
+      </td>
+    </tr>
+    </table>
+    {% endfor %}
+  </td></tr>
+
+  <!-- Key Levels -->
+  {% if levels %}
+  <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
+  <tr><td style="padding:20px 30px">
+    <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td width="50%" style="vertical-align:top">
+        <div style="font-size:11px;color:#10b981;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">支撑位</div>
+        {% for lv in levels.supports[:3] %}
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ lv.source }})</span></div>
+        {% endfor %}
+      </td>
+      <td width="50%" style="vertical-align:top">
+        <div style="font-size:11px;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">阻力位</div>
+        {% for lv in levels.resistances[:3] %}
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ lv.source }})</span></div>
+        {% endfor %}
+      </td>
+    </tr>
+    </table>
+  </td></tr>
+  {% endif %}
+
+  <!-- AI Analysis -->
+  {% if ai_analysis %}
+  <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
+  <tr><td style="padding:20px 30px">
+    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">AI 分析</div>
+    <div style="font-size:13px;color:#cbd5e1;line-height:1.8;padding:16px;background:#0f172a;border-radius:8px;border-left:3px solid #00d4ff">
+      {{ ai_analysis|replace('\n', '<br>') }}
+    </div>
+  </td></tr>
+  {% endif %}
+
+  <!-- Footer -->
+  <tr><td style="padding:20px 30px;text-align:center;border-top:1px solid #1e293b">
+    <div style="font-size:11px;color:#475569;line-height:1.6">
+      CryptoSignal Hub · {{ timestamp }}<br>
+      数据来源 OKX / Binance / Deribit / Yahoo · 仅供参考，不构成投资建议
+    </div>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

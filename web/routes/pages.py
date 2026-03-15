@@ -19,8 +19,13 @@ async def dashboard(request: Request):
     scheduler = request.app.state.job_scheduler
     config = cm.config
 
+    symbols = config.general.symbols or ["BTC/USDT"]
+    active_symbol = request.query_params.get("symbol", symbols[0])
+    if active_symbol not in symbols:
+        active_symbol = symbols[0]
+
     latest = scheduler.latest_reports
-    report = latest.get(config.general.symbols[0]) if latest else None
+    report = latest.get(active_symbol) if latest else None
     reports_list = db.get_recent_reports(limit=10)
     collector_status = request.app.state.collector_registry.status
     emails_today = db.count_emails_today()
@@ -31,6 +36,8 @@ async def dashboard(request: Request):
     return request.app.state.templates.TemplateResponse("dashboard.html", {
         "request": request,
         "config": config,
+        "symbols": symbols,
+        "active_symbol": active_symbol,
         "report": report,
         "reports_list": reports_list,
         "collector_status": collector_status,

@@ -119,6 +119,15 @@ class JobScheduler:
                     replace_existing=True,
                 )
 
+        # 4. 信号回测验证（每 2 小时检查一次过去的信号）
+        self._scheduler.add_job(
+            self._run_signal_backtest,
+            IntervalTrigger(hours=2),
+            id="signal_backtest",
+            name="信号回测验证 (每2小时)",
+            replace_existing=True,
+        )
+
         logger.info("调度器配置完成: %d 个任务", len(self._scheduler.get_jobs()))
 
     def start(self) -> None:
@@ -145,27 +154,77 @@ class JobScheduler:
             await self._analyze_symbol(symbol, alert_type=AlertType.HOURLY_REPORT)
 
     async def _run_daily_report(self) -> None:
-        """日报推送"""
+        """日报推送：绕过 throttle，始终发送"""
         for symbol in self._config.general.symbols:
             report_dict = await self._analyze_symbol(
-                symbol, alert_type=AlertType.DAILY_REPORT
+                symbol, alert_type=AlertType.DAILY_REPORT, skip_dispatch=True
             )
-            # 日报始终发送，不经过 throttle
-            if report_dict:
-                from core.models import SignalReport
-                # 通过 dispatcher 的日报专用方法发送
-                logger.info("日报生成完成: %s", symbol)
+            if report_dict and report_dict.get("_report_obj"):
+                report_obj = report_dict.pop("_report_obj")
+                await self._dispatcher.dispatch_daily_report(report_obj)
+                logger.info("日报已发送: %s", symbol)
 
     async def _run_us_market_alert(self) -> None:
         """美股开盘前后的加强监控"""
-        logger.info("🔔 美股开盘时段，启动加强监控")
+        logger.info("美股开盘时段，启动加强监控")
         for symbol in self._config.general.symbols:
             await self._analyze_symbol(
                 symbol, alert_type=AlertType.STRONG_SIGNAL
             )
 
+    async def _run_signal_backtest(self) -> None:
+        """回测验证历史信号：对比信号方向与后续实际价格走势"""
+        import ccxt.async_support as ccxt
+
+        unverified = self._db.get_unverified_signals(hours_ago=4)
+        if not unverified:
+            return
+
+        logger.info("信号回测: 检查 %d 条待验证信号", len(unverified))
+
+        for signal in unverified:
+            try:
+                symbol = signal["symbol"]
+                direction = signal["direction"]
+                snapshot = json.loads(signal.get("snapshot_json", "{}"))
+                entry_price = snapshot.get("price", {}).get("current", 0)
+                if not entry_price:
+                    continue
+
+                ex = ccxt.okx({"enableRateLimit": True})
+                try:
+                    ticker = await ex.fetch_ticker(symbol)
+                    current_price = ticker.get("last", 0)
+                finally:
+                    await ex.close()
+
+                if not current_price:
+                    continue
+
+                price_change_pct = ((current_price - entry_price) / entry_price) * 100
+
+                if direction == "bullish":
+                    correct = price_change_pct > 0
+                elif direction == "bearish":
+                    correct = price_change_pct < 0
+                else:
+                    correct = abs(price_change_pct) < 1.0
+
+                self._db.update_signal_outcome(signal["id"], current_price, correct)
+                logger.info(
+                    "回测 %s: %s 入场%.0f 当前%.0f (%+.2f%%) → %s",
+                    signal["id"][:8], direction,
+                    entry_price, current_price, price_change_pct,
+                    "正确" if correct else "错误",
+                )
+            except Exception as e:
+                logger.warning("回测信号 %s 失败: %s", signal["id"][:8], e)
+
     async def _analyze_symbol(
-        self, symbol: str, alert_type: AlertType = AlertType.HOURLY_REPORT
+        self,
+        symbol: str,
+        alert_type: AlertType = AlertType.HOURLY_REPORT,
+        skip_dispatch: bool = False,
     ) -> dict | None:
         """执行单个交易对的完整分析流程"""
         try:
@@ -187,7 +246,6 @@ class JobScheduler:
                 ai_text = await self._ai_reporter.analyze(
                     snapshot.to_dict(), summary
                 )
-                # 由于 SignalReport 是 frozen，需要重建
                 report = SignalReport(
                     id=report.id,
                     timestamp=report.timestamp,
@@ -209,8 +267,11 @@ class JobScheduler:
             self._db.save_report(report_dict)
             self._latest_reports[symbol] = report_dict
 
-            # 5. 通知分发
-            await self._dispatcher.dispatch(report)
+            # 5. 通知分发（日报场景由调用方单独处理）
+            if not skip_dispatch:
+                await self._dispatcher.dispatch(report)
+            else:
+                report_dict["_report_obj"] = report
 
             logger.info(
                 "分析完成: %s | 评分 %s | 信心度 %.0f%% | 强度 %s",

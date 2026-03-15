@@ -83,11 +83,13 @@ def build_services(config_manager: ConfigManager):
     from collectors.exchange import ExchangeCollector
     from collectors.macro import MacroCollector
     from collectors.options import OptionsCollector
+    from collectors.calendar import CalendarCollector
 
     collector_registry = CollectorRegistry()
     collector_registry.register(ExchangeCollector(config.exchanges))
     collector_registry.register(MacroCollector())
     collector_registry.register(OptionsCollector(config.exchanges))
+    collector_registry.register(CalendarCollector())
 
     # ── 3. 评分引擎 ──
     from engine.scorer import SignalScorer

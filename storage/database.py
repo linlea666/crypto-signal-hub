@@ -218,9 +218,8 @@ class Database:
             return row["timestamp"] if row else None
 
     def get_signal_accuracy_stats(self, symbol: str = "", days: int = 7) -> dict:
-        """统计近 N 天的信号准确率（需要后续价格验证）"""
+        """统计近 N 天的信号分布和准确率"""
         with self._connect() as conn:
-            cutoff = datetime.now().isoformat()  # 简化版先返回基础统计
             query = """
                 SELECT signal_strength, direction, COUNT(*) as cnt
                 FROM signal_reports
@@ -233,8 +232,71 @@ class Database:
             query += " GROUP BY signal_strength, direction"
 
             rows = conn.execute(query, params).fetchall()
+
+            accuracy = self._calculate_accuracy(conn, days, symbol)
+
             return {
                 "period_days": days,
                 "breakdown": [dict(row) for row in rows],
                 "total": sum(row["cnt"] for row in rows),
+                "accuracy": accuracy,
             }
+
+    def update_signal_outcome(
+        self, report_id: str, price_after: float, correct: bool
+    ) -> None:
+        """记录信号结果（由回测任务调用）"""
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE signal_reports
+                   SET suggestion_json = json_set(
+                       COALESCE(NULLIF(suggestion_json, '""'), '{}'),
+                       '$.price_after', ?,
+                       '$.correct', ?
+                   )
+                   WHERE id = ?""",
+                (price_after, int(correct), report_id),
+            )
+
+    def get_unverified_signals(self, hours_ago: int = 4) -> list[dict]:
+        """获取需要回测验证的信号（已产生超过 N 小时但未验证的强/中信号）"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT id, symbol, direction, total_score, timestamp,
+                          snapshot_json, suggestion_json
+                   FROM signal_reports
+                   WHERE signal_strength IN ('strong', 'moderate')
+                   AND timestamp <= datetime('now', ?)
+                   AND (suggestion_json IS NULL OR suggestion_json = ''
+                        OR suggestion_json = '""'
+                        OR json_extract(suggestion_json, '$.correct') IS NULL)
+                   ORDER BY timestamp DESC LIMIT 50""",
+                (f"-{hours_ago} hours",),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    @staticmethod
+    def _calculate_accuracy(conn, days: int, symbol: str = "") -> dict:
+        """计算已验证信号的准确率"""
+        query = """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN json_extract(suggestion_json, '$.correct') = 1 THEN 1 ELSE 0 END) as correct_cnt
+            FROM signal_reports
+            WHERE signal_strength IN ('strong', 'moderate')
+            AND timestamp >= date('now', ?)
+            AND json_extract(suggestion_json, '$.correct') IS NOT NULL
+        """
+        params: list = [f"-{days} days"]
+        if symbol:
+            query += " AND symbol = ?"
+            params.append(symbol)
+
+        row = conn.execute(query, params).fetchone()
+        total = row["total"] if row else 0
+        correct = row["correct_cnt"] if row else 0
+        return {
+            "verified": total,
+            "correct": correct,
+            "rate": round((correct / total * 100), 1) if total > 0 else 0,
+        }
