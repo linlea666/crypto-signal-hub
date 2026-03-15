@@ -10,11 +10,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from config.schema import ScheduleConfig
 from core.constants import SignalStrength
 from core.models import SignalReport
+from core.time_utils import now_beijing
 from storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class NotificationThrottle:
 
     def _is_quiet_hours(self) -> bool:
         """是否处于静默时段"""
-        now = datetime.now()
+        now = now_beijing()
         try:
             start_parts = self._config.quiet_hours_start.split(":")
             end_parts = self._config.quiet_hours_end.split(":")
@@ -100,6 +101,6 @@ class NotificationThrottle:
         try:
             last_time = datetime.fromisoformat(last_time_str)
             cooldown = timedelta(hours=self._config.duplicate_signal_cooldown_hours)
-            return datetime.now() - last_time < cooldown
+            return now_beijing() - last_time < cooldown
         except (ValueError, TypeError):
             return False

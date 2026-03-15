@@ -2,7 +2,8 @@ FROM python:3.11-slim AS base
 
 # 系统依赖（最小化层）
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tini && \
+    apt-get install -y --no-install-recommends curl tini tzdata && \
+    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,7 +23,8 @@ VOLUME ["/app/data"]
 ENV CSH_DOCKER=true \
     CSH_HOST=0.0.0.0 \
     CSH_PORT=8686 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Shanghai
 
 EXPOSE 8686
 

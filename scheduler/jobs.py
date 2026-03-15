@@ -515,7 +515,7 @@ class JobScheduler:
                 "supports": [_level_dict(lv) for lv in report.key_levels.supports],
                 "resistances": [_level_dict(lv) for lv in report.key_levels.resistances],
             },
-            "trade": _serialize_trade(report.trade_suggestion),
+            "trade": JobScheduler._serialize_trade(report.trade_suggestion),
         }
 
     @staticmethod

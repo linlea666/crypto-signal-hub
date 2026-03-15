@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 
 from core.interfaces import DataCollector
+from core.time_utils import now_beijing
 from core.models import (
     DerivativesData,
     FundingRateData,
@@ -57,7 +57,7 @@ class CollectorRegistry:
         单个采集器异常时记录错误并跳过，保证其他数据可用。
         """
         snapshot_data: dict = {}
-        now = datetime.now()
+        now = now_beijing()
 
         tasks = []
         for collector in self._collectors:
@@ -74,14 +74,14 @@ class CollectorRegistry:
             await collector.collect(symbol, snapshot_data)
             self._status[collector.name] = {
                 "ok": True,
-                "last_run": datetime.now().isoformat(),
+                "last_run": now_beijing().isoformat(),
                 "error": "",
             }
         except Exception as e:
             logger.error("采集器 %s 执行失败: %s", collector.name, e, exc_info=True)
             self._status[collector.name] = {
                 "ok": False,
-                "last_run": datetime.now().isoformat(),
+                "last_run": now_beijing().isoformat(),
                 "error": str(e),
             }
 

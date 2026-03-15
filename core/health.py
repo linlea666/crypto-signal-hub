@@ -13,13 +13,13 @@ import logging
 import smtplib
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 
 import ccxt.async_support as ccxt
 import httpx
 
 from config.schema import AIConfig, EmailConfig, ExchangeConfig
+from core.time_utils import now_beijing
 
 logger = logging.getLogger(__name__)
 
@@ -121,14 +121,14 @@ class HealthChecker:
             elif isinstance(p, Exception):
                 results.append(ProbeResult(
                     name="未知", status=HealthStatus.ERROR,
-                    message=str(p), last_check=datetime.now().isoformat(),
+                    message=str(p), last_check=now_beijing().isoformat(),
                 ))
 
         overall = self._determine_overall(results)
         report = HealthReport(
             overall=overall,
             probes=results,
-            checked_at=datetime.now().isoformat(),
+            checked_at=now_beijing().isoformat(),
         )
         self._last_report = report
         return report
@@ -149,7 +149,7 @@ class HealthChecker:
 
     async def _probe_exchange(self, exchange_id: str, label: str) -> ProbeResult:
         """探测交易所 API 可用性（获取 BTC ticker）"""
-        now = datetime.now().isoformat()
+        now = now_beijing().isoformat()
         try:
             exchange_class = getattr(ccxt, exchange_id, None)
             if not exchange_class:
@@ -181,7 +181,7 @@ class HealthChecker:
 
     async def _probe_yfinance(self) -> ProbeResult:
         """探测 yfinance（美股数据）可用性"""
-        now = datetime.now().isoformat()
+        now = now_beijing().isoformat()
         try:
             start = time.monotonic()
             async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
@@ -215,7 +215,7 @@ class HealthChecker:
 
     async def _probe_fear_greed(self) -> ProbeResult:
         """探测恐惧贪婪指数 API"""
-        now = datetime.now().isoformat()
+        now = now_beijing().isoformat()
         try:
             start = time.monotonic()
             async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
@@ -241,7 +241,7 @@ class HealthChecker:
 
     async def _probe_ai(self) -> ProbeResult:
         """探测 AI 服务可用性"""
-        now = datetime.now().isoformat()
+        now = now_beijing().isoformat()
         if not self._ai_config.enabled or not self._ai_config.api_key:
             return ProbeResult(
                 name="AI 分析",
@@ -280,7 +280,7 @@ class HealthChecker:
 
     async def _probe_smtp(self) -> ProbeResult:
         """探测邮件 SMTP 服务可用性（仅连接测试，不发送邮件）"""
-        now = datetime.now().isoformat()
+        now = now_beijing().isoformat()
         cfg = self._email_config
         if not cfg.enabled or not cfg.smtp_user:
             return ProbeResult(

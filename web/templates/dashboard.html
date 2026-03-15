@@ -10,6 +10,23 @@
 {% endblock %}
 
 {% block content %}
+{# ── 中文标签映射（兼容旧数据库记录可能缺少 label 字段） ── #}
+{% set FACTOR_CN = {
+    "technical": "技术面", "funding_rate": "资金费率",
+    "open_interest": "持仓量", "long_short_ratio": "多空比",
+    "options": "期权数据", "macro": "宏观环境", "sentiment": "市场情绪",
+} %}
+{% set SOURCE_CN = {
+    "MA20": "20日均线", "MA60": "60日均线",
+    "24h_low": "24h低点", "24h_high": "24h高点",
+    "options_put_oi": "期权Put密集", "options_call_oi": "期权Call密集",
+    "max_pain": "最大痛点", "fib_0.382": "斐波那契38.2%",
+    "fib_0.500": "斐波那契50%", "fib_0.618": "斐波那契61.8%",
+    "swing_low": "前期低点", "swing_high": "前期高点",
+    "round_number": "整数关口", "orderbook_bid": "买盘密集区", "orderbook_ask": "卖盘密集区",
+} %}
+{% set STRENGTH_CN = {"strong": "强", "medium": "中", "weak": "弱"} %}
+
 {# ── 安全解构（report 可能为 None） ── #}
 {% set snap = (report.get('snapshot', {}) if report else {}) %}
 {% set price = snap.get('price', {}) %}
@@ -136,7 +153,7 @@
             {% for fs in scores %}
             {% set pct = ((fs.score|abs / fs.max_score) * 50)|int if fs.max_score else 0 %}
             <div class="factor-row">
-                <span class="factor-name">{{ fs.get('label', fs.name) if fs is mapping else fs.label }}</span>
+                <span class="factor-name">{{ fs.get('label') or FACTOR_CN.get(fs.name, fs.name) }}</span>
                 <div class="factor-bar-track">
                     {% if fs.score >= 0 %}
                     <div class="factor-bar-fill positive" style="width:{{ pct }}%;left:50%"></div>
@@ -159,9 +176,9 @@
                 <div class="strip-meta" style="color:var(--bullish);margin-bottom:4px">支撑位</div>
                 {% for lv in levels.get('supports', [])[:4] %}
                 <div class="level-item">
-                    <span class="level-strength {{ lv.get('strength', 'medium') }}">{{ lv.get('strength_label', lv.get('strength', '')) }}</span>
+                    <span class="level-strength {{ lv.get('strength', 'medium') }}">{{ lv.get('strength_label') or STRENGTH_CN.get(lv.get('strength',''), lv.get('strength','')) }}</span>
                     <span class="level-price mono">${{ "%.0f"|format(lv.price) }}</span>
-                    <span class="strip-meta">{{ lv.get('source_label', lv.source) }}</span>
+                    <span class="strip-meta">{{ lv.get('source_label') or SOURCE_CN.get(lv.source, lv.source) }}</span>
                 </div>
                 {% else %}<div class="strip-meta">暂无</div>{% endfor %}
             </div>
@@ -169,9 +186,9 @@
                 <div class="strip-meta" style="color:var(--bearish);margin-bottom:4px">阻力位</div>
                 {% for lv in levels.get('resistances', [])[:4] %}
                 <div class="level-item">
-                    <span class="level-strength {{ lv.get('strength', 'medium') }}">{{ lv.get('strength_label', lv.get('strength', '')) }}</span>
+                    <span class="level-strength {{ lv.get('strength', 'medium') }}">{{ lv.get('strength_label') or STRENGTH_CN.get(lv.get('strength',''), lv.get('strength','')) }}</span>
                     <span class="level-price mono">${{ "%.0f"|format(lv.price) }}</span>
-                    <span class="strip-meta">{{ lv.get('source_label', lv.source) }}</span>
+                    <span class="strip-meta">{{ lv.get('source_label') or SOURCE_CN.get(lv.source, lv.source) }}</span>
                 </div>
                 {% else %}<div class="strip-meta">暂无</div>{% endfor %}
             </div>

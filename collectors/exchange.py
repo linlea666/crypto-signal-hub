@@ -312,14 +312,16 @@ class ExchangeCollector(DataCollector):
             hi = current_price * (1 + range_pct)
 
             bid_volumes: dict[float, float] = {}
-            for price, vol in bids:
+            for entry in bids:
+                price, vol = float(entry[0]), float(entry[1])
                 if price < lo:
                     break
                 bucket = round(price / 100) * 100 if current_price > 5000 else round(price / 10) * 10
                 bid_volumes[bucket] = bid_volumes.get(bucket, 0) + price * vol
 
             ask_volumes: dict[float, float] = {}
-            for price, vol in asks:
+            for entry in asks:
+                price, vol = float(entry[0]), float(entry[1])
                 if price > hi:
                     break
                 bucket = round(price / 100) * 100 if current_price > 5000 else round(price / 10) * 10

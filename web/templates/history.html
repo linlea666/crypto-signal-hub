@@ -2,28 +2,34 @@
 {% block title %}历史 — CryptoSignal Hub{% endblock %}
 
 {% block content %}
+{% set DIRECTION_CN = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"} %}
+{% set STRENGTH_CN = {"strong": "强信号", "moderate": "中等", "weak": "弱信号"} %}
+{% set ALERT_CN = {"daily_report": "日报", "hourly_report": "常规", "strong_signal": "强信号", "event_warning": "事件", "anomaly": "异常"} %}
+
 <h1 class="page-title">信号历史</h1>
 
 <!-- Stats -->
-<div class="overview-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr))">
+<div class="market-grid" style="margin-bottom:20px">
     <div class="card" style="text-align:center;padding:16px">
-        <div class="price-meta">近 {{ stats.period_days }} 天</div>
-        <div class="price-current mono" style="font-size:28px">{{ stats.total }}</div>
-        <div class="price-meta">总信号数</div>
+        <div class="strip-meta">近 {{ stats.get('period_days', 7) }} 天</div>
+        <div class="mono" style="font-size:28px;color:var(--primary);margin:6px 0">{{ stats.get('total', 0) }}</div>
+        <div class="strip-meta">总信号数</div>
     </div>
     {% for item in stats.get('breakdown', []) %}
     <div class="card" style="text-align:center;padding:16px">
-        <div class="signal-badge {{ item.signal_strength }}" style="font-size:10px;padding:2px 8px">{{ item.signal_strength }}</div>
-        <div class="mono" style="font-size:20px;margin:8px 0;color:{{ '#10b981' if item.direction == 'bullish' else ('#ef4444' if item.direction == 'bearish' else '#94a3b8') }}">
-            {{ item.cnt }}
+        <div class="signal-badge {{ item.get('signal_strength', 'weak') }}" style="font-size:10px;padding:2px 8px">
+            {{ STRENGTH_CN.get(item.get('signal_strength', ''), item.get('signal_strength', '')) }}
         </div>
-        <div class="price-meta">{{ item.direction }}</div>
+        <div class="mono" style="font-size:20px;margin:8px 0;color:{{ '#10b981' if item.get('direction') == 'bullish' else ('#ef4444' if item.get('direction') == 'bearish' else '#94a3b8') }}">
+            {{ item.get('cnt', 0) }}
+        </div>
+        <div class="strip-meta">{{ DIRECTION_CN.get(item.get('direction', ''), item.get('direction', '')) }}</div>
     </div>
     {% endfor %}
 </div>
 
 <!-- Reports Table -->
-<div class="card" style="margin-top:20px">
+<div class="card" style="margin-top:12px">
     <div class="card-title">历史记录</div>
     <div style="overflow-x:auto">
         <table class="data-table">
@@ -41,20 +47,25 @@
             </thead>
             <tbody>
                 {% for r in reports %}
-                <tr class="clickable-row" onclick="window.location='/api/report/{{ r.id }}'">
-                    <td class="mono">{{ r.timestamp[:16] }}</td>
-                    <td>{{ r.symbol }}</td>
-                    <td class="text-{{ r.direction }}">
-                        {{ '偏多' if r.direction == 'bullish' else ('偏空' if r.direction == 'bearish' else '中性') }}
+                {% set rd = r if r is mapping else {} %}
+                <tr class="clickable-row" onclick="window.location='/api/report/{{ rd.get('id','') }}'">
+                    <td class="mono">{{ (rd.get('timestamp','') or '')[:16] }}</td>
+                    <td>{{ rd.get('symbol', '') }}</td>
+                    <td class="text-{{ rd.get('direction', 'neutral') }}">
+                        {{ DIRECTION_CN.get(rd.get('direction', ''), rd.get('direction', '')) }}
                     </td>
-                    <td class="mono">{{ "%+.0f"|format(r.total_score) }}/{{ "%.0f"|format(r.max_score) }}</td>
-                    <td class="mono">{{ "%.0f"|format(r.confidence) }}%</td>
-                    <td><span class="signal-badge {{ r.signal_strength }}">{{ r.signal_strength }}</span></td>
-                    <td class="price-meta">{{ r.alert_type }}</td>
-                    <td>{{ '✓' if r.email_sent else '' }}</td>
+                    <td class="mono">{{ "%+.0f"|format(rd.get('total_score', 0)) }}/{{ "%.0f"|format(rd.get('max_score', 0)) }}</td>
+                    <td class="mono">{{ "%.0f"|format(rd.get('confidence', 0)) }}%</td>
+                    <td>
+                        <span class="signal-badge {{ rd.get('signal_strength', 'weak') }}">
+                            {{ STRENGTH_CN.get(rd.get('signal_strength', ''), rd.get('signal_strength', '')) }}
+                        </span>
+                    </td>
+                    <td class="strip-meta">{{ ALERT_CN.get(rd.get('alert_type', ''), rd.get('alert_type', '')) }}</td>
+                    <td>{{ '✓' if rd.get('email_sent') else '' }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="price-meta" style="text-align:center;padding:40px">暂无历史数据</td></tr>
+                <tr><td colspan="8" class="strip-meta" style="text-align:center;padding:40px">暂无历史数据</td></tr>
                 {% endfor %}
             </tbody>
         </table>

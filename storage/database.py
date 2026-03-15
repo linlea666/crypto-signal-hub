@@ -10,9 +10,10 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Generator
+
+from core.time_utils import now_beijing
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class Database:
             conn.execute(
                 """INSERT INTO notification_log (report_id, channel, sent_at, success, error_message)
                    VALUES (?, ?, ?, ?, ?)""",
-                (report_id, channel, datetime.now().isoformat(), int(success), error),
+                (report_id, channel, now_beijing().isoformat(), int(success), error),
             )
 
     # ── 读操作 ──
@@ -216,7 +217,7 @@ class Database:
 
     def count_emails_today(self) -> int:
         """统计今日已发送邮件数"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_beijing().strftime("%Y-%m-%d")
         with self._connect() as conn:
             row = conn.execute(
                 """SELECT COUNT(*) as cnt FROM notification_log
