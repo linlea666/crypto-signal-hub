@@ -46,6 +46,9 @@ class TechnicalData:
     structure: str = "unknown"
     swing_highs: list[float] = field(default_factory=list)
     swing_lows: list[float] = field(default_factory=list)
+    # ── 量价分析（从现有 K 线纯计算，无需额外 API） ──
+    vwap: float | None = None          # 成交量加权平均价
+    volume_ratio: float | None = None  # 当前成交量 / 近期均量，>1.5 放量，<0.5 缩量
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,8 @@ class FundingRateData:
     rates: dict[str, float] = field(default_factory=dict)  # {exchange: rate}
     average: float = 0.0
     level: FundingRateLevel = FundingRateLevel.NORMAL
+    # ── 期现基差（httpx 从 OKX premium 接口补充） ──
+    basis_rate: float = 0.0  # (合约价-现货价)/现货价，正=期货升水，负=贴水
 
 
 @dataclass(frozen=True)

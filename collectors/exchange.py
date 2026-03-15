@@ -1,21 +1,19 @@
-"""交易所数据采集器（基于 CCXT）。
+"""交易所数据采集器（CCXT 主干 + httpx 精准补充）。
 
-从 OKX / 币安等交易所获取：
-- 价格与 K 线
-- 资金费率
-- 持仓量 (OI)
-- 多空比
-- 技术指标（基于 K 线计算）
+数据获取策略：
+- CCXT：价格、K 线、资金费率等级、OI、多空比、挂单簿（统一抽象层）
+- httpx 直调 Binance klines：获取 CCXT 丢弃的 taker 买入量（K 线第 9 字段）
+- httpx 直调 OKX funding-rate：获取 CCXT 丢弃的 premium（期现基差）
 
-所有 CCXT 调用通过异步接口执行，避免阻塞事件循环。
+纯计算（零额外 API）：VWAP 和量价比从现有 K 线数据推导。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import ccxt.async_support as ccxt
+import httpx
 import pandas as pd
 import ta
 
@@ -156,6 +154,12 @@ class ExchangeCollector(DataCollector):
         swing_h = self._find_swing_points(highs.values, mode="high")
         swing_l = self._find_swing_points(lows.values, mode="low")
 
+        # ── VWAP：成交量加权平均价（从 K 线纯计算，无额外 API） ──
+        vwap_val = self._calculate_vwap(df)
+
+        # ── 量价比：最近 1 根 K 线量 / 近 20 根均量 ──
+        volume_ratio = self._calculate_volume_ratio(df["volume"])
+
         return TechnicalData(
             ma20=round(ma20, 2),
             ma60=round(ma60_val, 2) if ma60_val else None,
@@ -164,7 +168,32 @@ class ExchangeCollector(DataCollector):
             structure=structure,
             swing_highs=[round(v, 2) for v in swing_h[:5]],
             swing_lows=[round(v, 2) for v in swing_l[:5]],
+            vwap=vwap_val,
+            volume_ratio=volume_ratio,
         )
+
+    @staticmethod
+    def _calculate_vwap(df: pd.DataFrame) -> float | None:
+        """VWAP = Σ(典型价 × 成交量) / Σ(成交量)，使用近 20 根 K 线"""
+        if len(df) < 5:
+            return None
+        recent = df.tail(20).copy()
+        typical_price = (recent["high"] + recent["low"] + recent["close"]) / 3
+        vol = recent["volume"]
+        total_vol = vol.sum()
+        if total_vol <= 0:
+            return None
+        return round(float((typical_price * vol).sum() / total_vol), 2)
+
+    @staticmethod
+    def _calculate_volume_ratio(volume_series: pd.Series) -> float | None:
+        """当前 K 线量 / 近 20 根均量，>1.5=放量，<0.5=缩量"""
+        if len(volume_series) < 5:
+            return None
+        avg_vol = volume_series.tail(20).mean()
+        if avg_vol <= 0:
+            return None
+        return round(float(volume_series.iloc[-1] / avg_vol), 2)
 
     @staticmethod
     def _find_swing_points(arr, mode="high", window=3):
@@ -182,7 +211,11 @@ class ExchangeCollector(DataCollector):
         return points
 
     async def _fetch_funding_rates(self, symbol: str) -> FundingRateData:
-        """从主/辅交易所获取资金费率并计算均值"""
+        """从主/辅交易所获取资金费率并计算均值。
+
+        同时通过 OKX REST API 获取 premium（期现基差），
+        这是 CCXT 标准化时丢弃的字段。
+        """
         swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
         rates: dict[str, float] = {}
 
@@ -202,7 +235,13 @@ class ExchangeCollector(DataCollector):
 
         avg = sum(rates.values()) / len(rates)
         level = self._classify_funding_rate(avg)
-        return FundingRateData(rates=rates, average=avg, level=level)
+
+        # 期现基差：OKX funding-rate 接口的 premium 字段（CCXT 丢弃了该字段）
+        basis = await self._fetch_basis_from_okx(symbol)
+
+        return FundingRateData(
+            rates=rates, average=avg, level=level, basis_rate=basis,
+        )
 
     @staticmethod
     def _classify_funding_rate(rate: float) -> FundingRateLevel:
@@ -263,17 +302,20 @@ class ExchangeCollector(DataCollector):
         return OIPriceSignal.LONG_LIQUIDATION
 
     async def _fetch_long_short(self, symbol: str) -> LongShortData:
-        """获取多空比数据（优先从币安获取，数据更丰富）"""
+        """获取多空比 + 真实 taker 买卖比。
+
+        多空比：通过 CCXT 从 Binance 获取。
+        Taker 买卖比：通过 httpx 直调 Binance klines API 获取
+        第 9 字段（taker_buy_base_asset_volume），这是 CCXT 丢弃的数据。
+        """
         ex = self._secondary or self._primary
         assert ex is not None
 
         swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
         account_ratio = 1.0
         top_ratio = 1.0
-        taker_ratio = 1.0
 
         try:
-            # CCXT 统一接口获取多空比
             ls_data = await ex.fetch_long_short_ratio_history(
                 swap_symbol, timeframe="1h", limit=1
             )
@@ -281,9 +323,12 @@ class ExchangeCollector(DataCollector):
                 latest = ls_data[-1]
                 ratio_val = float(latest.get("longShortRatio", 1.0))
                 account_ratio = ratio_val
-                top_ratio = ratio_val  # 部分交易所不区分，先用同一值
+                top_ratio = ratio_val
         except Exception as e:
             logger.warning("获取多空比失败 (%s): %s", symbol, e)
+
+        # 真实 taker 买卖比：Binance K 线第 9 字段
+        taker_ratio = await self._fetch_taker_ratio_from_binance(symbol)
 
         return LongShortData(
             account_ratio=round(account_ratio, 4),
@@ -344,3 +389,68 @@ class ExchangeCollector(DataCollector):
             logger.warning("挂单簿深度分析失败 (%s): %s", symbol, e)
 
         return result
+
+    # ══════════════════════════════════════════════
+    # httpx 精准补充：获取 CCXT 丢弃的字段
+    # ══════════════════════════════════════════════
+
+    async def _fetch_taker_ratio_from_binance(self, symbol: str) -> float:
+        """从 Binance K 线获取真实 taker 买卖比。
+
+        Binance klines 返回 12 个字段，第 5 字段是总成交量，
+        第 9 字段（index=9）是 taker_buy_base_asset_volume。
+        taker_buy_ratio = taker_buy_volume / total_volume。
+        >0.5 表示主动买入占优，<0.5 表示主动卖出占优。
+        使用近 6 根 4h K 线（24 小时）的聚合值。
+        """
+        # BTC/USDT → BTCUSDT
+        bn_symbol = symbol.replace("/", "")
+        url = "https://api.binance.com/api/v3/klines"
+        params = {"symbol": bn_symbol, "interval": "4h", "limit": 6}
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                klines = resp.json()
+
+            total_vol = sum(float(k[5]) for k in klines)
+            taker_buy_vol = sum(float(k[9]) for k in klines)
+            if total_vol <= 0:
+                return 1.0
+            taker_sell_vol = total_vol - taker_buy_vol
+            # 返回 买/卖 比值（与 LongShortData.taker_buy_sell_ratio 语义一致）
+            if taker_sell_vol <= 0:
+                return 2.0
+            return round(taker_buy_vol / taker_sell_vol, 4)
+        except Exception as e:
+            logger.warning("Binance taker 买卖比获取失败 (%s): %s", symbol, e)
+            return 1.0
+
+    async def _fetch_basis_from_okx(self, symbol: str) -> float:
+        """从 OKX funding-rate 接口获取 premium（期现基差）。
+
+        OKX 返回的 premium 字段是 CCXT 丢弃的，公式：
+        [max(0, 买价-指数价) - max(0, 指数价-卖价)] / 指数价
+        正值=合约升水（看多偏向），负值=贴水（看空偏向）。
+        """
+        # BTC/USDT → BTC-USDT-SWAP
+        base = symbol.split("/")[0]
+        inst_id = f"{base}-USDT-SWAP"
+        url = "https://www.okx.com/api/v5/public/funding-rate"
+        params = {"instId": inst_id}
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+            items = data.get("data", [])
+            if items:
+                premium_str = items[0].get("premium", "0")
+                return round(float(premium_str), 6) if premium_str else 0.0
+            return 0.0
+        except Exception as e:
+            logger.warning("OKX 期现基差获取失败 (%s): %s", symbol, e)
+            return 0.0
