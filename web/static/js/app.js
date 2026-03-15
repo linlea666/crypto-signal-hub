@@ -319,34 +319,19 @@
     var STATUS_ICON = { ok: '🟢', degraded: '🟡', error: '🔴', unknown: '⚪' };
 
     function renderHealthBar(data) {
-        var grid = document.getElementById('healthGrid');
-        if (!grid || !data || !data.probes) return;
+        var bar = document.getElementById('health-bar');
+        if (!bar || !data || !data.probes) return;
 
-        var overallEl = document.querySelector('.health-overall');
-        if (overallEl) {
-            var status = typeof data.overall === 'object' ? data.overall.value : data.overall;
-            overallEl.className = 'health-overall health-' + status;
-            overallEl.textContent = data.ok_count + '/' + data.total_count + ' 正常';
-        }
-
-        grid.innerHTML = data.probes.map(function (p) {
+        bar.innerHTML = data.probes.map(function (p) {
             var st = typeof p.status === 'object' ? p.status.value : p.status;
-            var icon = STATUS_ICON[st] || '⚪';
-            var latency = p.latency_ms > 0
-                ? '<div class="probe-latency">' + Math.round(p.latency_ms) + 'ms</div>'
-                : '';
-            return '<div class="health-probe health-probe-' + st + '">' +
-                '<div class="probe-status">' + icon + '</div>' +
-                '<div class="probe-info">' +
-                '<div class="probe-name">' + p.name + '</div>' +
-                '<div class="probe-message">' + p.message + '</div>' +
-                '</div>' + latency + '</div>';
+            var detail = p.latency_ms > 0
+                ? '<span class="mono strip-meta">' + Math.round(p.latency_ms) + 'ms</span>'
+                : '<span class="strip-meta">' + (p.message || '').substring(0, 20) + '</span>';
+            return '<div class="health-probe">' +
+                '<span class="health-dot ' + st + '"></span>' +
+                '<span class="health-probe-name">' + p.name + '</span>' +
+                detail + '</div>';
         }).join('');
-
-        var footer = document.querySelector('.health-footer');
-        if (footer && data.checked_at) {
-            footer.textContent = '上次检查: ' + data.checked_at.substring(0, 19);
-        }
     }
 
     // ── Auto-Refresh ──

@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """数据大屏首页"""
+    """数据大屏首页——始终渲染所有面板，无数据时显示占位"""
     cm = request.app.state.config_manager
     if cm.is_first_run:
         return RedirectResponse(url="/setup")
@@ -24,11 +24,17 @@ async def dashboard(request: Request):
     if active_symbol not in symbols:
         active_symbol = symbols[0]
 
+    # 优先取内存缓存，fallback 到 DB 持久化数据
+    report = None
     latest = scheduler.latest_reports
-    report = latest.get(active_symbol) if latest else None
+    if latest:
+        report = latest.get(active_symbol)
+    if not report:
+        report = db.get_latest_report(active_symbol)
+
     reports_list = db.get_recent_reports(limit=10)
-    collector_status = request.app.state.collector_registry.status
     emails_today = db.count_emails_today()
+    stats = db.get_signal_accuracy_stats(days=7)
 
     health_checker = request.app.state.health_checker
     health_report = health_checker.last_report if health_checker else None
@@ -40,9 +46,9 @@ async def dashboard(request: Request):
         "active_symbol": active_symbol,
         "report": report,
         "reports_list": reports_list,
-        "collector_status": collector_status,
         "emails_today": emails_today,
         "health": health_report,
+        "stats": stats,
     })
 
 
