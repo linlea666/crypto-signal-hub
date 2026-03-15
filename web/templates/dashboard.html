@@ -284,7 +284,8 @@
         <div class="card-title">
             <span>近期信号</span>
             {% if stats and stats.get('total', 0) > 0 %}
-            <span class="strip-meta" style="margin-left:auto">准确率 {{ "%.0f"|format(stats.get('accuracy', 0)) }}% ({{ stats.total }}条)</span>
+            {% set acc = stats.get('accuracy', {}) %}
+            <span class="strip-meta" style="margin-left:auto">准确率 {{ "%.0f"|format(acc.get('rate', 0) if acc is mapping else 0) }}% ({{ stats.total }}条)</span>
             {% endif %}
         </div>
         {% if reports_list %}
