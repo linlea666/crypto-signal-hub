@@ -84,6 +84,31 @@ class NotificationDispatcher:
                     error=str(e),
                 )
 
+    async def dispatch_text(self, tag: str, text: str) -> None:
+        """发送纯文本通知（统计报告等，不需要 SignalReport）"""
+        html = f"""
+        <div style="font-family:monospace;padding:20px;background:#060a14;color:#e2e8f0;
+                    border:1px solid rgba(0,200,255,0.2);border-radius:8px;white-space:pre-wrap">
+            {text}
+        </div>"""
+        for channel in self._channels:
+            if not channel.enabled:
+                continue
+            try:
+                success = await channel.send_html(
+                    subject=f"CryptoSignal Hub — {tag}",
+                    html_content=html,
+                )
+                if success:
+                    logger.info("文本通知[%s]已发送 via %s", tag, channel.name)
+            except AttributeError:
+                try:
+                    success = await channel.send(None, html)
+                except Exception as e:
+                    logger.warning("文本通知[%s]发送失败 via %s: %s", tag, channel.name, e)
+            except Exception as e:
+                logger.warning("文本通知[%s]发送失败 via %s: %s", tag, channel.name, e)
+
     async def dispatch_daily_report(self, report: SignalReport) -> None:
         """日报：跳过 throttle 检查（日报是计划任务），直接发送"""
         html_content = self._render_fn(report)

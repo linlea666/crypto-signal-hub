@@ -59,7 +59,6 @@ class CollectorRegistry:
         snapshot_data: dict = {}
         now = datetime.now()
 
-        # 并行执行所有采集器
         tasks = []
         for collector in self._collectors:
             tasks.append(self._run_collector(collector, symbol, snapshot_data))
@@ -105,6 +104,7 @@ class CollectorRegistry:
             options=data.get("options"),
             macro=data.get("macro"),
             events=data.get("events", []),
+            orderbook_clusters=data.get("orderbook_clusters", {}),
         )
 
     async def cleanup_all(self) -> None:

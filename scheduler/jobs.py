@@ -120,12 +120,35 @@ class JobScheduler:
                     replace_existing=True,
                 )
 
-        # 4. 信号回测验证（每 2 小时检查一次过去的信号）
+        # 4. 信号回测验证（多时间窗口）
         self._scheduler.add_job(
-            self._run_signal_backtest,
+            lambda: asyncio.ensure_future(self._run_signal_backtest("4h", 4)),
             IntervalTrigger(hours=2),
-            id="signal_backtest",
-            name="信号回测验证 (每2小时)",
+            id="backtest_4h",
+            name="回测验证 4h窗口",
+            replace_existing=True,
+        )
+        self._scheduler.add_job(
+            lambda: asyncio.ensure_future(self._run_signal_backtest("12h", 12)),
+            IntervalTrigger(hours=4),
+            id="backtest_12h",
+            name="回测验证 12h窗口",
+            replace_existing=True,
+        )
+        self._scheduler.add_job(
+            lambda: asyncio.ensure_future(self._run_signal_backtest("24h", 24)),
+            IntervalTrigger(hours=6),
+            id="backtest_24h",
+            name="回测验证 24h窗口",
+            replace_existing=True,
+        )
+
+        # 5. 每日统计推送（21:00）
+        self._scheduler.add_job(
+            self._run_daily_stats,
+            CronTrigger(hour=21, minute=0),
+            id="daily_stats",
+            name="每日回测统计 (21:00)",
             replace_existing=True,
         )
 
@@ -173,53 +196,86 @@ class JobScheduler:
                 symbol, alert_type=AlertType.STRONG_SIGNAL
             )
 
-    async def _run_signal_backtest(self) -> None:
-        """回测验证历史信号：对比信号方向与后续实际价格走势"""
+    async def _run_signal_backtest(self, window: str = "4h", hours_ago: int = 4) -> None:
+        """多窗口回测验证历史信号"""
         import ccxt.async_support as ccxt
 
-        unverified = self._db.get_unverified_signals(hours_ago=4)
+        unverified = self._db.get_unverified_signals(hours_ago=hours_ago, window=window)
         if not unverified:
             return
 
-        logger.info("信号回测: 检查 %d 条待验证信号", len(unverified))
+        logger.info("回测[%s]: 检查 %d 条信号", window, len(unverified))
 
-        for signal in unverified:
-            try:
-                symbol = signal["symbol"]
-                direction = signal["direction"]
-                snapshot = json.loads(signal.get("snapshot_json", "{}"))
-                entry_price = snapshot.get("price", {}).get("current", 0)
-                if not entry_price:
-                    continue
-
-                ex = ccxt.okx({"enableRateLimit": True})
+        ex = ccxt.okx({"enableRateLimit": True, "timeout": 8000})
+        try:
+            for signal in unverified:
                 try:
+                    symbol = signal["symbol"]
+                    direction = signal["direction"]
+                    snapshot = json.loads(signal.get("snapshot_json", "{}"))
+                    entry_price = snapshot.get("price", {}).get("current", 0)
+                    if not entry_price:
+                        continue
+
                     ticker = await ex.fetch_ticker(symbol)
                     current_price = ticker.get("last", 0)
-                finally:
-                    await ex.close()
+                    if not current_price:
+                        continue
 
-                if not current_price:
-                    continue
+                    change_pct = ((current_price - entry_price) / entry_price) * 100
 
-                price_change_pct = ((current_price - entry_price) / entry_price) * 100
+                    if direction == "bullish":
+                        correct = change_pct > 0
+                    elif direction == "bearish":
+                        correct = change_pct < 0
+                    else:
+                        correct = abs(change_pct) < 1.0
 
-                if direction == "bullish":
-                    correct = price_change_pct > 0
-                elif direction == "bearish":
-                    correct = price_change_pct < 0
-                else:
-                    correct = abs(price_change_pct) < 1.0
+                    self._db.update_signal_outcome(
+                        signal["id"], current_price, correct,
+                        window=window, change_pct=change_pct,
+                    )
+                    logger.info(
+                        "回测[%s] %s: %s %.0f→%.0f (%+.2f%%) %s",
+                        window, signal["id"][:8], direction,
+                        entry_price, current_price, change_pct,
+                        "✓" if correct else "✗",
+                    )
+                except Exception as e:
+                    logger.warning("回测[%s] %s 失败: %s", window, signal["id"][:8], e)
+        finally:
+            await ex.close()
 
-                self._db.update_signal_outcome(signal["id"], current_price, correct)
-                logger.info(
-                    "回测 %s: %s 入场%.0f 当前%.0f (%+.2f%%) → %s",
-                    signal["id"][:8], direction,
-                    entry_price, current_price, price_change_pct,
-                    "正确" if correct else "错误",
-                )
-            except Exception as e:
-                logger.warning("回测信号 %s 失败: %s", signal["id"][:8], e)
+    async def _run_daily_stats(self) -> None:
+        """每日 21:00 推送回测统计"""
+        try:
+            stats = self._db.get_backtest_stats(days=1)
+            summary = stats.get("summary", {})
+            if summary.get("verified", 0) == 0:
+                logger.info("今日无已验证信号，跳过统计推送")
+                return
+
+            w24 = stats.get("24h", {})
+            w12 = stats.get("12h", {})
+            w4 = stats.get("4h", {})
+
+            text = (
+                f"📊 CryptoSignal Hub 每日统计\n\n"
+                f"今日信号: {summary['verified']} 条 | "
+                f"命中: {summary['correct']} 条 | "
+                f"准确率: {summary['rate']}%\n\n"
+                f"分窗口统计:\n"
+                f"  4h:  {w4.get('rate', 0)}% ({w4.get('verified', 0)}条, "
+                f"均变 {w4.get('avg_change_pct', 0):+.2f}%)\n"
+                f"  12h: {w12.get('rate', 0)}% ({w12.get('verified', 0)}条, "
+                f"均变 {w12.get('avg_change_pct', 0):+.2f}%)\n"
+                f"  24h: {w24.get('rate', 0)}% ({w24.get('verified', 0)}条, "
+                f"均变 {w24.get('avg_change_pct', 0):+.2f}%)"
+            )
+            await self._dispatcher.dispatch_text("daily_stats", text)
+            logger.info("每日统计已推送")
+        except Exception as e:
+            logger.error("每日统计推送失败: %s", e)
 
     async def _analyze_symbol(
         self,
@@ -285,9 +341,51 @@ class JobScheduler:
             logger.error("分析 %s 失败: %s", symbol, e, exc_info=True)
             return None
 
+    # 中文标签映射（因子名、关键位来源、强度）
+    _FACTOR_LABELS = {
+        "technical": "技术面",
+        "funding_rate": "资金费率",
+        "open_interest": "持仓量",
+        "long_short_ratio": "多空比",
+        "options": "期权数据",
+        "macro": "宏观环境",
+        "sentiment": "市场情绪",
+    }
+    _SOURCE_LABELS = {
+        "MA20": "20日均线",
+        "MA60": "60日均线",
+        "24h_low": "24h低点",
+        "24h_high": "24h高点",
+        "options_put_oi": "期权Put密集",
+        "options_call_oi": "期权Call密集",
+        "max_pain": "最大痛点",
+        "fib_0.382": "斐波那契38.2%",
+        "fib_0.500": "斐波那契50%",
+        "fib_0.618": "斐波那契61.8%",
+        "swing_low": "前期低点",
+        "swing_high": "前期高点",
+        "round_number": "整数关口",
+        "orderbook_bid": "买盘密集区",
+        "orderbook_ask": "卖盘密集区",
+    }
+    _STRENGTH_LABELS = {"strong": "强", "medium": "中", "weak": "弱"}
+
     @staticmethod
     def _serialize_report(report) -> dict:
         """将 SignalReport 序列化为可存储的字典"""
+        fl = JobScheduler._FACTOR_LABELS
+        sl = JobScheduler._SOURCE_LABELS
+        stl = JobScheduler._STRENGTH_LABELS
+
+        def _level_dict(lv):
+            return {
+                "price": lv.price,
+                "source": lv.source,
+                "source_label": sl.get(lv.source, lv.source),
+                "strength": lv.strength,
+                "strength_label": stl.get(lv.strength, lv.strength),
+            }
+
         return {
             "id": report.id,
             "timestamp": report.timestamp.isoformat(),
@@ -303,6 +401,10 @@ class JobScheduler:
             "scores": [
                 {
                     "name": fs.name,
+                    "label": fl.get(
+                        fs.name.value if hasattr(fs.name, "value") else fs.name,
+                        str(fs.name),
+                    ),
                     "score": fs.score,
                     "max_score": fs.max_score,
                     "direction": fs.direction.value,
@@ -311,13 +413,7 @@ class JobScheduler:
                 for fs in report.factor_scores
             ],
             "levels": {
-                "supports": [
-                    {"price": lv.price, "source": lv.source, "strength": lv.strength}
-                    for lv in report.key_levels.supports
-                ],
-                "resistances": [
-                    {"price": lv.price, "source": lv.source, "strength": lv.strength}
-                    for lv in report.key_levels.resistances
-                ],
+                "supports": [_level_dict(lv) for lv in report.key_levels.supports],
+                "resistances": [_level_dict(lv) for lv in report.key_levels.resistances],
             },
         }

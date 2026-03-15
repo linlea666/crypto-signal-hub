@@ -2,12 +2,23 @@
     'use strict';
 
     const REFRESH_INTERVAL = 5 * 60 * 1000;
+    const TICKER_INTERVAL = 15 * 1000;
     const ANIMATION_DURATION = 800;
 
     const FACTOR_KEYS = [
         'technical', 'funding_rate', 'open_interest',
         'long_short_ratio', 'options', 'macro', 'sentiment'
     ];
+
+    const FACTOR_LABELS = {
+        'technical': '技术面',
+        'funding_rate': '资金费率',
+        'open_interest': '持仓量',
+        'long_short_ratio': '多空比',
+        'options': '期权数据',
+        'macro': '宏观环境',
+        'sentiment': '市场情绪'
+    };
 
     const FEAR_GREED_THRESHOLDS = [
         { max: 25, color: '#ef4444' },
@@ -89,7 +100,9 @@
 
         destroyExistingChart(canvasId);
 
-        var labels = scores.map(function (s) { return s.name; });
+        var labels = scores.map(function (s) {
+            return s.label || FACTOR_LABELS[s.name] || s.name;
+        });
         var normalized = scores.map(function (s) {
             return s.max_score ? s.score / s.max_score : 0;
         });
@@ -360,6 +373,46 @@
         }, REFRESH_INTERVAL);
     }
 
+    // ── 实时价格轮询 ──
+
+    function startTickerPolling() {
+        if (window.location.pathname !== '/') return;
+        var coinTab = document.querySelector('.coin-tab.active');
+        if (!coinTab) return;
+        var href = coinTab.getAttribute('href') || '';
+        var match = href.match(/symbol=([^&]+)/);
+        if (!match) return;
+        var symbol = decodeURIComponent(match[1]);
+
+        function poll() {
+            fetch('/api/ticker/' + encodeURIComponent(symbol))
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data || !data.price) return;
+                    var priceEl = document.getElementById('live-price');
+                    var changeEl = document.getElementById('live-change');
+                    var tagEl = document.getElementById('price-live-tag');
+
+                    if (priceEl) {
+                        var p = Number(data.price);
+                        priceEl.textContent = '$' + p.toLocaleString('en-US', {
+                            minimumFractionDigits: 2, maximumFractionDigits: 2
+                        });
+                    }
+                    if (changeEl && data.change_pct != null) {
+                        var c = Number(data.change_pct);
+                        changeEl.textContent = (c >= 0 ? '+' : '') + c.toFixed(2) + '%';
+                        changeEl.className = 'strip-change ' + (c >= 0 ? 'positive' : 'negative');
+                    }
+                    if (tagEl) tagEl.style.display = 'inline';
+                })
+                .catch(function () { /* silent */ });
+        }
+
+        poll();
+        setInterval(poll, TICKER_INTERVAL);
+    }
+
     function updateDashboardData(report) {
         if (!report) return;
 
@@ -435,6 +488,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         initChartsFromDOM();
         startAutoRefresh();
+        startTickerPolling();
     });
 
     window.initRadarChart = initRadarChart;

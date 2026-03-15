@@ -42,8 +42,9 @@ class TechnicalData:
     ma60: float | None = None
     ma_trend: Direction = Direction.NEUTRAL
     rsi_4h: float | None = None
-    # K 线结构：higher_highs / lower_lows / range
     structure: str = "unknown"
+    swing_highs: list[float] = field(default_factory=list)
+    swing_lows: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ class MarketSnapshot:
     options: OptionsData | None = None
     macro: MacroData | None = None
     events: list[UpcomingEvent] = field(default_factory=list)
+    orderbook_clusters: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典，用于 AI 输入和存储"""

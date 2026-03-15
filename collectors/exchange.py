@@ -81,6 +81,11 @@ class ExchangeCollector(DataCollector):
         # 4. 多空比（币安独有接口更丰富）
         snapshot_data["long_short"] = await self._fetch_long_short(symbol)
 
+        # 5. 挂单簿深度密集区
+        snapshot_data["orderbook_clusters"] = await self._fetch_orderbook_clusters(
+            symbol, price_data.current
+        )
+
         return snapshot_data
 
     # ── 私有方法 ──
@@ -122,10 +127,11 @@ class ExchangeCollector(DataCollector):
         df = pd.DataFrame(ohlcv, columns=["ts", "open", "high", "low", "close", "volume"])
 
         close = df["close"]
+        highs = df["high"]
+        lows = df["low"]
         ma20 = close.rolling(window=20).mean().iloc[-1]
         ma60_val = close.rolling(window=min(60, len(close))).mean().iloc[-1] if len(close) >= 30 else None
 
-        # MA 趋势判断
         current_price = close.iloc[-1]
         if ma60_val and ma20 > ma60_val and current_price > ma20:
             ma_trend = Direction.BULLISH
@@ -134,11 +140,9 @@ class ExchangeCollector(DataCollector):
         else:
             ma_trend = Direction.NEUTRAL
 
-        # RSI (4h)
         rsi_series = ta.momentum.rsi(close, window=14)
         rsi_val = rsi_series.iloc[-1] if not rsi_series.empty else None
 
-        # K 线结构判断（近期高低点趋势）
         recent = close.tail(10).values
         structure = "range"
         if len(recent) >= 4:
@@ -149,13 +153,33 @@ class ExchangeCollector(DataCollector):
             elif lows_falling:
                 structure = "lower_lows"
 
+        swing_h = self._find_swing_points(highs.values, mode="high")
+        swing_l = self._find_swing_points(lows.values, mode="low")
+
         return TechnicalData(
             ma20=round(ma20, 2),
             ma60=round(ma60_val, 2) if ma60_val else None,
             ma_trend=ma_trend,
             rsi_4h=round(rsi_val, 2) if rsi_val and pd.notna(rsi_val) else None,
             structure=structure,
+            swing_highs=[round(v, 2) for v in swing_h[:5]],
+            swing_lows=[round(v, 2) for v in swing_l[:5]],
         )
+
+    @staticmethod
+    def _find_swing_points(arr, mode="high", window=3):
+        """从价格序列中找出局部极值（swing high/low）"""
+        points = []
+        if len(arr) < window * 2 + 1:
+            return points
+        for i in range(window, len(arr) - window):
+            segment = arr[i - window: i + window + 1]
+            if mode == "high" and arr[i] == max(segment):
+                points.append(float(arr[i]))
+            elif mode == "low" and arr[i] == min(segment):
+                points.append(float(arr[i]))
+        points.sort(reverse=(mode == "high"))
+        return points
 
     async def _fetch_funding_rates(self, symbol: str) -> FundingRateData:
         """从主/辅交易所获取资金费率并计算均值"""
@@ -266,3 +290,55 @@ class ExchangeCollector(DataCollector):
             top_trader_ratio=round(top_ratio, 4),
             taker_buy_sell_ratio=round(taker_ratio, 4),
         )
+
+    async def _fetch_orderbook_clusters(
+        self, symbol: str, current_price: float
+    ) -> dict:
+        """从挂单簿中找出大额挂单密集区（不需要 API key）"""
+        ex = self._primary
+        assert ex is not None
+        result = {"bid_clusters": [], "ask_clusters": []}
+
+        if current_price <= 0:
+            return result
+
+        try:
+            ob = await ex.fetch_order_book(symbol, limit=50)
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+
+            range_pct = 0.05
+            lo = current_price * (1 - range_pct)
+            hi = current_price * (1 + range_pct)
+
+            bid_volumes: dict[float, float] = {}
+            for price, vol in bids:
+                if price < lo:
+                    break
+                bucket = round(price / 100) * 100 if current_price > 5000 else round(price / 10) * 10
+                bid_volumes[bucket] = bid_volumes.get(bucket, 0) + price * vol
+
+            ask_volumes: dict[float, float] = {}
+            for price, vol in asks:
+                if price > hi:
+                    break
+                bucket = round(price / 100) * 100 if current_price > 5000 else round(price / 10) * 10
+                ask_volumes[bucket] = ask_volumes.get(bucket, 0) + price * vol
+
+            if bid_volumes:
+                avg_bid = sum(bid_volumes.values()) / len(bid_volumes)
+                result["bid_clusters"] = sorted(
+                    [p for p, v in bid_volumes.items() if v > avg_bid * 1.5],
+                    reverse=True,
+                )[:3]
+
+            if ask_volumes:
+                avg_ask = sum(ask_volumes.values()) / len(ask_volumes)
+                result["ask_clusters"] = sorted(
+                    [p for p, v in ask_volumes.items() if v > avg_ask * 1.5],
+                )[:3]
+
+        except Exception as e:
+            logger.warning("挂单簿深度分析失败 (%s): %s", symbol, e)
+
+        return result

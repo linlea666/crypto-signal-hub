@@ -243,23 +243,42 @@ class Database:
             }
 
     def update_signal_outcome(
-        self, report_id: str, price_after: float, correct: bool
+        self, report_id: str, price_after: float, correct: bool,
+        window: str = "4h", change_pct: float = 0.0,
     ) -> None:
-        """记录信号结果（由回测任务调用）"""
+        """记录信号回测结果（支持多时间窗口: 4h/12h/24h）"""
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT suggestion_json FROM signal_reports WHERE id = ?",
+                (report_id,),
+            ).fetchone()
+            existing = {}
+            if row and row["suggestion_json"]:
+                try:
+                    existing = json.loads(row["suggestion_json"])
+                    if not isinstance(existing, dict):
+                        existing = {}
+                except (json.JSONDecodeError, TypeError):
+                    existing = {}
+
+            existing[window] = {
+                "price_after": price_after,
+                "correct": correct,
+                "change_pct": round(change_pct, 3),
+            }
+            if "correct" not in existing:
+                best = existing.get("24h") or existing.get("12h") or existing.get("4h")
+                if best:
+                    existing["correct"] = best["correct"]
+                    existing["price_after"] = best["price_after"]
+
             conn.execute(
-                """UPDATE signal_reports
-                   SET suggestion_json = json_set(
-                       COALESCE(NULLIF(suggestion_json, '""'), '{}'),
-                       '$.price_after', ?,
-                       '$.correct', ?
-                   )
-                   WHERE id = ?""",
-                (price_after, int(correct), report_id),
+                "UPDATE signal_reports SET suggestion_json = ? WHERE id = ?",
+                (json.dumps(existing, ensure_ascii=False), report_id),
             )
 
-    def get_unverified_signals(self, hours_ago: int = 4) -> list[dict]:
-        """获取需要回测验证的信号（已产生超过 N 小时但未验证的强/中信号）"""
+    def get_unverified_signals(self, hours_ago: int = 4, window: str = "4h") -> list[dict]:
+        """获取指定窗口下待验证的信号"""
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT id, symbol, direction, total_score, timestamp,
@@ -267,25 +286,73 @@ class Database:
                    FROM signal_reports
                    WHERE signal_strength IN ('strong', 'moderate')
                    AND timestamp <= datetime('now', ?)
+                   AND timestamp >= datetime('now', '-3 days')
                    AND (suggestion_json IS NULL OR suggestion_json = ''
                         OR suggestion_json = '""'
-                        OR json_extract(suggestion_json, '$.correct') IS NULL)
+                        OR json_extract(suggestion_json, '$.' || ?) IS NULL)
                    ORDER BY timestamp DESC LIMIT 50""",
-                (f"-{hours_ago} hours",),
+                (f"-{hours_ago} hours", window),
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_backtest_stats(self, days: int = 7, symbol: str = "") -> dict:
+        """获取多窗口回测统计数据"""
+        with self._connect() as conn:
+            result = {}
+            for win in ("4h", "12h", "24h"):
+                result[win] = self._calc_window_accuracy(conn, win, days, symbol)
+            result["summary"] = self._calculate_accuracy(conn, days, symbol)
+            return result
+
     @staticmethod
-    def _calculate_accuracy(conn, days: int, symbol: str = "") -> dict:
-        """计算已验证信号的准确率"""
-        query = """
+    def _calc_window_accuracy(conn, window: str, days: int, symbol: str = "") -> dict:
+        query = f"""
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN json_extract(suggestion_json, '$.correct') = 1 THEN 1 ELSE 0 END) as correct_cnt
+                SUM(CASE WHEN json_extract(suggestion_json, '$.{window}.correct') = 1 THEN 1 ELSE 0 END) as correct_cnt,
+                AVG(CASE WHEN json_extract(suggestion_json, '$.{window}.change_pct') IS NOT NULL
+                         THEN json_extract(suggestion_json, '$.{window}.change_pct') END) as avg_change
             FROM signal_reports
             WHERE signal_strength IN ('strong', 'moderate')
             AND timestamp >= date('now', ?)
-            AND json_extract(suggestion_json, '$.correct') IS NOT NULL
+            AND json_extract(suggestion_json, '$.{window}') IS NOT NULL
+        """
+        params: list = [f"-{days} days"]
+        if symbol:
+            query += " AND symbol = ?"
+            params.append(symbol)
+        row = conn.execute(query, params).fetchone()
+        total = row["total"] if row else 0
+        correct = row["correct_cnt"] if row else 0
+        avg_chg = row["avg_change"] if row else 0
+        return {
+            "verified": total,
+            "correct": correct,
+            "rate": round((correct / total * 100), 1) if total > 0 else 0,
+            "avg_change_pct": round(avg_chg or 0, 3),
+        }
+
+    @staticmethod
+    def _calculate_accuracy(conn, days: int, symbol: str = "") -> dict:
+        """以最长窗口（24h > 12h > 4h）的结果计算综合准确率"""
+        query = """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE
+                    WHEN json_extract(suggestion_json, '$.24h.correct') = 1 THEN 1
+                    WHEN json_extract(suggestion_json, '$.24h') IS NULL
+                         AND json_extract(suggestion_json, '$.12h.correct') = 1 THEN 1
+                    WHEN json_extract(suggestion_json, '$.24h') IS NULL
+                         AND json_extract(suggestion_json, '$.12h') IS NULL
+                         AND json_extract(suggestion_json, '$.4h.correct') = 1 THEN 1
+                    WHEN json_extract(suggestion_json, '$.correct') = 1 THEN 1
+                    ELSE 0
+                END) as correct_cnt
+            FROM signal_reports
+            WHERE signal_strength IN ('strong', 'moderate')
+            AND timestamp >= date('now', ?)
+            AND (json_extract(suggestion_json, '$.4h') IS NOT NULL
+                 OR json_extract(suggestion_json, '$.correct') IS NOT NULL)
         """
         params: list = [f"-{days} days"]
         if symbol:

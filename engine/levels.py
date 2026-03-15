@@ -1,15 +1,19 @@
-"""关键价位识别。
+"""关键价位识别（增强版）。
 
-综合技术面和衍生品数据识别支撑位和阻力位：
-- K 线前高前低
-- MA 均线位置
-- 期权 Put OI 密集区（支撑）/ Call OI 密集区（阻力）
-- Max Pain 位置
+综合多种数据源识别支撑位和阻力位：
+- MA 均线（MA20/MA60）
+- 24h 高低点
+- 期权 Put/Call OI 密集区 + Max Pain
+- 斐波那契回撤位（0.382 / 0.5 / 0.618）
+- 整数心理关口
+- 前期 Swing High / Swing Low
 
 关键位来源越多则强度越高（共振）。
 """
 
 from __future__ import annotations
+
+import math
 
 from core.models import KeyLevel, KeyLevels, MarketSnapshot
 
@@ -59,6 +63,38 @@ def identify_key_levels(snapshot: MarketSnapshot) -> KeyLevels:
             source="24h_high", strength="medium",
         ))
 
+    # ── 斐波那契回撤位 ──
+    _add_fibonacci_levels(snapshot.price.high_24h, snapshot.price.low_24h,
+                          price, supports, resistances)
+
+    # ── 整数心理关口 ──
+    _add_round_number_levels(price, supports, resistances)
+
+    # ── Swing High / Low ──
+    for sh in tech.swing_highs:
+        if sh > price * 1.001:
+            resistances.append(KeyLevel(
+                price=sh, level_type="resistance",
+                source="swing_high", strength="medium",
+            ))
+        elif sh < price * 0.999:
+            supports.append(KeyLevel(
+                price=sh, level_type="support",
+                source="swing_high", strength="weak",
+            ))
+
+    for sl in tech.swing_lows:
+        if sl < price * 0.999:
+            supports.append(KeyLevel(
+                price=sl, level_type="support",
+                source="swing_low", strength="medium",
+            ))
+        elif sl > price * 1.001:
+            resistances.append(KeyLevel(
+                price=sl, level_type="resistance",
+                source="swing_low", strength="weak",
+            ))
+
     # ── 期权 OI 密集区 ──
     opts = snapshot.options
     if opts:
@@ -75,7 +111,6 @@ def identify_key_levels(snapshot: MarketSnapshot) -> KeyLevels:
                     source="options_call_oi", strength="strong",
                 ))
 
-        # Max Pain 位置
         if opts.max_pain:
             if opts.max_pain < price:
                 supports.append(KeyLevel(
@@ -88,36 +123,115 @@ def identify_key_levels(snapshot: MarketSnapshot) -> KeyLevels:
                     source="max_pain", strength="strong",
                 ))
 
-    # 按价格排序：支撑从高到低（最近的在前），阻力从低到高
+    # ── 挂单簿深度密集区 ──
+    ob = snapshot.orderbook_clusters
+    if ob:
+        for bid_price in ob.get("bid_clusters", []):
+            if bid_price < price:
+                supports.append(KeyLevel(
+                    price=float(bid_price), level_type="support",
+                    source="orderbook_bid", strength="medium",
+                ))
+        for ask_price in ob.get("ask_clusters", []):
+            if ask_price > price:
+                resistances.append(KeyLevel(
+                    price=float(ask_price), level_type="resistance",
+                    source="orderbook_ask", strength="medium",
+                ))
+
     supports.sort(key=lambda x: x.price, reverse=True)
     resistances.sort(key=lambda x: x.price)
 
-    # 去重：相近价位（0.5% 以内）只保留强度最高的
     supports = _deduplicate_levels(supports, price)
     resistances = _deduplicate_levels(resistances, price)
 
     return KeyLevels(supports=supports[:5], resistances=resistances[:5])
 
 
+def _add_fibonacci_levels(
+    high: float, low: float, price: float,
+    supports: list[KeyLevel], resistances: list[KeyLevel],
+) -> None:
+    """基于 24h 高低点计算斐波那契回撤位"""
+    if not high or not low or high <= low:
+        return
+    span = high - low
+    if span / price < 0.005:
+        return
+
+    for ratio, label in [(0.382, "fib_0.382"), (0.500, "fib_0.500"), (0.618, "fib_0.618")]:
+        level = high - span * ratio
+        if abs(level - price) / price < 0.001:
+            continue
+        if level < price:
+            supports.append(KeyLevel(
+                price=round(level, 2), level_type="support",
+                source=label, strength="weak",
+            ))
+        else:
+            resistances.append(KeyLevel(
+                price=round(level, 2), level_type="resistance",
+                source=label, strength="weak",
+            ))
+
+
+def _add_round_number_levels(
+    price: float,
+    supports: list[KeyLevel], resistances: list[KeyLevel],
+) -> None:
+    """在当前价附近找整数心理关口"""
+    if price <= 0:
+        return
+
+    magnitude = 10 ** max(0, int(math.log10(price)) - 1)
+    step = max(magnitude, 1000) if price > 5000 else max(magnitude, 100)
+
+    base = int(price / step) * step
+    for mult in range(-2, 4):
+        level = base + mult * step
+        if level <= 0:
+            continue
+        dist = abs(level - price) / price
+        if dist < 0.002 or dist > 0.08:
+            continue
+        if level < price:
+            supports.append(KeyLevel(
+                price=float(level), level_type="support",
+                source="round_number", strength="weak",
+            ))
+        else:
+            resistances.append(KeyLevel(
+                price=float(level), level_type="resistance",
+                source="round_number", strength="weak",
+            ))
+
+
 def _deduplicate_levels(levels: list[KeyLevel], reference_price: float) -> list[KeyLevel]:
-    """合并相近价位的关键位，保留强度最高的"""
+    """合并相近价位，多来源汇聚时提升强度（共振）"""
     if not levels or reference_price <= 0:
         return levels
 
-    threshold = reference_price * 0.005  # 0.5% 以内视为同一价位
-    result: list[KeyLevel] = []
+    threshold = reference_price * 0.005
     strength_order = {"strong": 3, "medium": 2, "weak": 1}
+    result: list[KeyLevel] = []
+    source_count: list[int] = []
 
     for level in levels:
         merged = False
         for i, existing in enumerate(result):
             if abs(level.price - existing.price) < threshold:
-                # 保留强度更高的
+                source_count[i] += 1
                 if strength_order.get(level.strength, 0) > strength_order.get(existing.strength, 0):
                     result[i] = level
+                elif source_count[i] >= 2 and existing.strength != "strong":
+                    result[i] = KeyLevel(
+                        price=existing.price, level_type=existing.level_type,
+                        source=existing.source, strength="strong",
+                    )
                 merged = True
                 break
         if not merged:
             result.append(level)
+            source_count.append(1)
 
     return result

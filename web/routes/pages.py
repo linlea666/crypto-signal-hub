@@ -35,6 +35,7 @@ async def dashboard(request: Request):
     reports_list = db.get_recent_reports(limit=10)
     emails_today = db.count_emails_today()
     stats = db.get_signal_accuracy_stats(days=7)
+    backtest = db.get_backtest_stats(days=7)
 
     health_checker = request.app.state.health_checker
     health_report = health_checker.last_report if health_checker else None
@@ -49,6 +50,7 @@ async def dashboard(request: Request):
         "emails_today": emails_today,
         "health": health_report,
         "stats": stats,
+        "backtest": backtest,
     })
 
 

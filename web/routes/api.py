@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-import os
+import logging
+import time
 from collections import deque
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 LOG_DIR = Path(__file__).parent.parent.parent / "data" / "logs"
+
+# 实时 ticker 缓存（30 秒有效期，避免交易所限流）
+_ticker_cache: dict[str, dict] = {}
+_ticker_cache_ts: dict[str, float] = {}
+_TICKER_TTL = 30
 
 
 @router.get("/status")
@@ -215,3 +222,46 @@ async def signal_stats(request: Request, days: int = 7):
     """信号统计数据"""
     db = request.app.state.db
     return db.get_signal_accuracy_stats(days=days)
+
+
+@router.get("/stats/backtest")
+async def backtest_stats(request: Request, days: int = 7, symbol: str = ""):
+    """多窗口回测统计"""
+    db = request.app.state.db
+    return db.get_backtest_stats(days=days, symbol=symbol or "")
+
+
+@router.get("/ticker/{symbol:path}")
+async def realtime_ticker(symbol: str):
+    """实时价格 ticker（30 秒缓存，用于前端轮询）"""
+    import ccxt.async_support as ccxt
+
+    now = time.monotonic()
+    cached = _ticker_cache.get(symbol)
+    if cached and (now - _ticker_cache_ts.get(symbol, 0)) < _TICKER_TTL:
+        return cached
+
+    try:
+        ex = ccxt.okx({"enableRateLimit": True, "timeout": 8000})
+        try:
+            t = await ex.fetch_ticker(symbol)
+        finally:
+            await ex.close()
+
+        result = {
+            "symbol": symbol,
+            "price": t.get("last"),
+            "change_pct": t.get("percentage"),
+            "high_24h": t.get("high"),
+            "low_24h": t.get("low"),
+            "volume_24h": t.get("quoteVolume"),
+            "timestamp": t.get("datetime", ""),
+        }
+        _ticker_cache[symbol] = result
+        _ticker_cache_ts[symbol] = now
+        return result
+    except Exception as e:
+        logger.warning("Ticker %s 获取失败: %s", symbol, e)
+        if cached:
+            return cached
+        return JSONResponse({"error": str(e)}, status_code=502)

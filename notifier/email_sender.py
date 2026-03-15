@@ -50,6 +50,12 @@ class EmailNotifier(Notifier):
         subject = self._build_subject(report)
         return self._send_html_email(subject, html_content)
 
+    async def send_html(self, subject: str, html_content: str) -> bool:
+        """直接发送 HTML 邮件（用于统计报告等非信号通知）"""
+        if not self.enabled:
+            return False
+        return self._send_html_email(subject, html_content)
+
     async def send_test(self) -> bool:
         """发送测试邮件"""
         html = """

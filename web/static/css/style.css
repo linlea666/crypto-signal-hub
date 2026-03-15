@@ -1,19 +1,19 @@
 /* ═══════════════════════════════════════════════════════════════
-   CryptoSignal Hub — Sci-Fi HUD Theme (Dense Layout)
-   参考 LIFE OS DASHBOARD：高信息密度 + 紧凑网格 + 科技蓝
+   CryptoSignal Hub — Sci-Fi HUD Theme v2
+   LIFE OS DASHBOARD 风格：高信息密度 + 紧凑网格 + 深色背景
    ═══════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 /* ── 1. CSS Variables ── */
 :root {
-    --bg-body: #060a14;
-    --bg-panel: rgba(12, 18, 32, 0.85);
-    --bg-input: #0b1120;
-    --bg-hover: #141e33;
+    --bg-body: #040810;
+    --bg-panel: rgba(10, 16, 28, 0.88);
+    --bg-input: #0a1018;
+    --bg-hover: #121c30;
 
-    --border-panel: rgba(0, 180, 220, 0.18);
-    --border-subtle: rgba(80, 100, 130, 0.18);
+    --border-panel: rgba(0, 200, 255, 0.22);
+    --border-subtle: rgba(80, 100, 130, 0.15);
 
     --primary: #00d4ff;
     --primary-dim: rgba(0, 212, 255, 0.30);
@@ -35,9 +35,9 @@
     --font-text: 'Inter', -apple-system, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
 
-    --radius: 8px;
-    --radius-sm: 5px;
-    --gap: 8px;
+    --radius: 6px;
+    --radius-sm: 4px;
+    --gap: 6px;
     --transition: 0.2s ease;
     --glow-sm: 0 0 8px rgba(0, 212, 255, 0.12);
 }
@@ -55,23 +55,23 @@ body {
 a { color: var(--primary); text-decoration: none; }
 a:hover { color: var(--accent); }
 
-/* ── 3. Navbar (40px 高度，单行) ── */
+/* ── 3. Navbar (38px) ── */
 .navbar {
     position: fixed;
     top: 0; left: 0; right: 0;
     z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 0 16px;
-    height: 40px;
-    background: rgba(8, 12, 22, 0.95);
+    gap: 14px;
+    padding: 0 14px;
+    height: 38px;
+    background: rgba(6, 10, 18, 0.96);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-panel);
 }
 
 .navbar-brand {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--primary);
     letter-spacing: 1px;
@@ -89,7 +89,7 @@ a:hover { color: var(--accent); }
 .coin-tabs::-webkit-scrollbar { display: none; }
 
 .coin-tab {
-    padding: 4px 12px;
+    padding: 3px 10px;
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     font-size: 11px;
@@ -114,10 +114,10 @@ a:hover { color: var(--accent); }
     flex-shrink: 0;
 }
 .nav-links a {
-    padding: 4px 10px;
+    padding: 3px 8px;
     border-radius: var(--radius-sm);
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
     transition: all var(--transition);
     letter-spacing: 0.3px;
@@ -125,33 +125,50 @@ a:hover { color: var(--accent); }
 .nav-links a:hover { color: var(--primary); background: var(--primary-glow); }
 .nav-links a.active { color: var(--primary); background: rgba(0, 212, 255, 0.08); }
 
-/* ── 4. Container ── */
+/* ── 4. Container (限宽 1360px) ── */
 .container {
-    max-width: 1500px;
+    max-width: 1360px;
     margin: 0 auto;
-    padding: 48px 12px 12px;
+    padding: 46px 10px 10px;
 }
 
-/* ── 5. Card (紧凑版) ── */
+/* ── 5. Card + HUD 角标装饰 ── */
 .card {
     background: var(--bg-panel);
     backdrop-filter: blur(10px);
     border: 1px solid var(--border-panel);
     border-radius: var(--radius);
-    padding: 14px;
+    padding: 12px;
     transition: border-color var(--transition), box-shadow var(--transition);
     animation: fade-in 0.3s ease-out;
+    position: relative;
 }
-.card:hover { border-color: rgba(0, 212, 255, 0.25); box-shadow: var(--glow-sm); }
-.card-sm { padding: 12px; }
+.card::before, .card::after {
+    content: '';
+    position: absolute;
+    width: 10px; height: 10px;
+    pointer-events: none;
+}
+.card::before {
+    top: -1px; left: -1px;
+    border-top: 2px solid var(--primary);
+    border-left: 2px solid var(--primary);
+}
+.card::after {
+    bottom: -1px; right: -1px;
+    border-bottom: 2px solid rgba(0, 200, 255, 0.15);
+    border-right: 2px solid rgba(0, 200, 255, 0.15);
+}
+.card:hover { border-color: rgba(0, 212, 255, 0.30); box-shadow: var(--glow-sm); }
+.card-sm { padding: 10px; }
 
 .card-title {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1.5px;
     color: var(--text-muted);
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -160,16 +177,26 @@ a:hover { color: var(--accent); }
     content: '';
     display: inline-block;
     width: 2px;
-    height: 10px;
+    height: 9px;
     background: var(--primary);
     border-radius: 1px;
     box-shadow: 0 0 4px var(--primary-dim);
 }
 
-/* ── 6. Overview Strip (横向指标条) ── */
+.card-time {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    opacity: 0.7;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* ── 6. Overview Strip ── */
 .overview-strip {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: 2fr 1.5fr 1fr 1.2fr 1.5fr;
     gap: var(--gap);
     margin-bottom: var(--gap);
 }
@@ -178,10 +205,20 @@ a:hover { color: var(--accent); }
     background: var(--bg-panel);
     border: 1px solid var(--border-panel);
     border-radius: var(--radius);
-    padding: 10px 12px;
+    padding: 8px 10px;
     transition: border-color var(--transition);
+    position: relative;
 }
-.strip-card:hover { border-color: rgba(0, 212, 255, 0.25); }
+.strip-card::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px;
+    width: 8px; height: 8px;
+    border-top: 2px solid var(--primary);
+    border-left: 2px solid var(--primary);
+    pointer-events: none;
+}
+.strip-card:hover { border-color: rgba(0, 212, 255, 0.30); }
 
 .strip-label {
     font-size: 9px;
@@ -189,12 +226,27 @@ a:hover { color: var(--accent); }
     text-transform: uppercase;
     letter-spacing: 1.2px;
     color: var(--text-muted);
-    margin-bottom: 4px;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.live-tag {
+    font-size: 8px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--bullish);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    animation: blink-dot 2s infinite;
 }
 
 .strip-value {
     font-family: var(--font-mono);
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
     color: var(--text-primary);
     line-height: 1.1;
@@ -224,8 +276,8 @@ a:hover { color: var(--accent); }
     font-family: var(--font-mono);
 }
 
-/* ── 宏观速览 (overview strip 内) ── */
-.macro-quick { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+/* 宏观速览 */
+.macro-quick { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
 .macro-quick-item {
     display: flex;
     align-items: center;
@@ -236,16 +288,16 @@ a:hover { color: var(--accent); }
     color: var(--text-muted);
     font-size: 9px;
     font-weight: 600;
-    width: 48px;
+    width: 32px;
     letter-spacing: 0.5px;
 }
 .macro-quick-item .positive { color: var(--bullish); }
 .macro-quick-item .negative { color: var(--bearish); }
 
-/* ── 7. Grid Layouts (紧凑间距) ── */
+/* ── 7. Grid Layouts ── */
 .analysis-grid {
     display: grid;
-    grid-template-columns: 280px 1fr 1fr;
+    grid-template-columns: 260px 1.2fr 1.5fr;
     gap: var(--gap);
     margin-bottom: var(--gap);
 }
@@ -264,50 +316,84 @@ a:hover { color: var(--accent); }
     margin-bottom: var(--gap);
 }
 
-/* ── 8. Panel Placeholder (无数据时) ── */
+.bottom-grid-3 {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr 1fr;
+    gap: var(--gap);
+    margin-bottom: var(--gap);
+}
+
+/* 回测统计面板 */
+.backtest-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    text-align: center;
+}
+.backtest-window {
+    padding: 8px 4px;
+    border-radius: var(--radius-sm);
+    background: rgba(8, 14, 26, 0.6);
+    border: 1px solid rgba(80, 100, 130, 0.06);
+}
+.backtest-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+.backtest-rate {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+/* ── 8. Placeholder ── */
 .panel-placeholder {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 140px;
+    min-height: 130px;
     color: var(--text-muted);
     font-size: 12px;
-    gap: 8px;
+    gap: 6px;
 }
 .placeholder-icon {
-    font-size: 28px;
-    opacity: 0.15;
+    font-size: 26px;
+    opacity: 0.12;
 }
 
-/* ── 9. Score Gauge ── */
-.gauge-container { display: flex; align-items: center; justify-content: center; padding: 8px 0; }
-.gauge-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--text-muted); margin-top: 4px; }
+/* ── 9. Score / Gauge ── */
+.gauge-container { display: flex; align-items: center; justify-content: center; padding: 6px 0; }
+.gauge-label { font-size: 10px; font-weight: 600; letter-spacing: 1px; color: var(--text-muted); margin-top: 4px; }
 
 .confidence-ring {
     position: relative;
-    width: 80px; height: 80px;
+    width: 76px; height: 76px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     background: conic-gradient(var(--primary) calc(var(--percent, 0) * 1%), rgba(100, 116, 139, 0.12) 0);
-    margin: 0 auto 8px;
+    margin: 0 auto 6px;
 }
 .confidence-ring::before {
-    content: ''; position: absolute; inset: 6px; border-radius: 50%;
+    content: ''; position: absolute; inset: 5px; border-radius: 50%;
     background: var(--bg-panel);
 }
 .confidence-ring > * { position: relative; z-index: 1; }
 .confidence-value { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
 
 /* ── 10. Factor Bars ── */
-.factor-list { display: flex; flex-direction: column; gap: 4px; }
+.factor-list { display: flex; flex-direction: column; gap: 3px; }
 .factor-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 3px 0; border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 0; border-radius: var(--radius-sm);
     transition: background var(--transition);
 }
 .factor-row:hover { background: rgba(0, 212, 255, 0.03); }
-.factor-name { width: 90px; font-size: 11px; color: var(--text-secondary); flex-shrink: 0; font-weight: 500; }
+.factor-name { width: 72px; font-size: 11px; color: var(--text-secondary); flex-shrink: 0; font-weight: 500; }
 .factor-bar-track {
     flex: 1; height: 4px;
     background: rgba(100, 116, 139, 0.10);
@@ -332,7 +418,7 @@ a:hover { color: var(--accent); }
     background: var(--text-muted); opacity: 0.3;
 }
 .factor-score {
-    width: 36px; text-align: right; font-weight: 600;
+    width: 32px; text-align: right; font-weight: 600;
     font-size: 11px; font-family: var(--font-mono);
 }
 
@@ -346,45 +432,52 @@ a:hover { color: var(--accent); }
 .signal-badge.moderate { background: rgba(245, 158, 11, 0.10); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.25); }
 .signal-badge.weak { background: var(--neutral-bg); color: var(--text-muted); border: 1px solid rgba(148, 163, 184, 0.15); }
 
-/* ── 12. Key Levels ── */
-.levels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* ── 12. Key Levels (增强分层展示) ── */
+.levels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .level-item {
-    display: flex; align-items: baseline; justify-content: space-between;
-    padding: 5px 8px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 6px; border-radius: var(--radius-sm);
     background: rgba(100, 116, 139, 0.04);
     font-size: 11px;
 }
-.level-price { font-family: var(--font-mono); font-weight: 600; font-size: 11px; }
+.level-price { font-family: var(--font-mono); font-weight: 600; font-size: 11px; flex-shrink: 0; }
+.level-strength {
+    font-size: 8px; font-weight: 700; padding: 1px 4px;
+    border-radius: 3px; flex-shrink: 0; letter-spacing: 0.3px;
+}
+.level-strength.strong { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.level-strength.medium { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
+.level-strength.weak { background: rgba(148, 163, 184, 0.10); color: var(--text-muted); }
 
 /* ── 13. AI Panel ── */
 .ai-panel {
     border-left: 2px solid var(--accent);
     background: rgba(34, 211, 238, 0.02);
     border-radius: 0 var(--radius) var(--radius) 0;
-    padding: 10px 12px;
+    padding: 8px 10px;
 }
 .ai-content {
     font-size: 12px; line-height: 1.7;
     color: var(--text-secondary);
-    max-height: 280px; overflow-y: auto;
+    max-height: 260px; overflow-y: auto;
 }
 
 /* ── 14. Metric Grid ── */
 .metric-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    gap: 6px;
 }
 .metric-item {
-    padding: 10px;
+    padding: 8px;
     border-radius: var(--radius-sm);
-    background: rgba(10, 16, 30, 0.6);
-    border: 1px solid rgba(80, 100, 130, 0.08);
+    background: rgba(8, 14, 26, 0.6);
+    border: 1px solid rgba(80, 100, 130, 0.06);
     transition: all var(--transition);
 }
 .metric-item:hover { border-color: var(--border-panel); }
 .metric-value {
-    font-family: var(--font-mono); font-size: 16px;
+    font-family: var(--font-mono); font-size: 18px;
     font-weight: 700; color: var(--text-primary); line-height: 1.2;
 }
 .metric-label {
@@ -398,36 +491,36 @@ a:hover { color: var(--accent); }
 
 /* ── 15. Timeline ── */
 .timeline-scroll {
-    display: flex; gap: 8px;
-    overflow-x: auto; padding: 4px 0 8px;
+    display: flex; gap: 6px;
+    overflow-x: auto; padding: 4px 0 6px;
     scrollbar-width: thin;
 }
 .timeline-item {
     flex-shrink: 0;
     display: flex; flex-direction: column; align-items: center;
-    gap: 3px; padding: 8px 12px;
+    gap: 2px; padding: 6px 10px;
     border-radius: var(--radius-sm);
-    background: rgba(10, 16, 30, 0.5);
-    border: 1px solid rgba(80, 100, 130, 0.08);
-    min-width: 70px; font-size: 11px;
+    background: rgba(8, 14, 26, 0.5);
+    border: 1px solid rgba(80, 100, 130, 0.06);
+    min-width: 64px; font-size: 11px;
     transition: all var(--transition);
 }
 .timeline-item:hover { border-color: var(--border-panel); background: var(--primary-glow); }
-.timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.timeline-dot.bullish { background: var(--bullish); box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
-.timeline-dot.bearish { background: var(--bearish); box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
+.timeline-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.timeline-dot.bullish { background: var(--bullish); box-shadow: 0 0 5px rgba(16, 185, 129, 0.5); }
+.timeline-dot.bearish { background: var(--bearish); box-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
 .timeline-dot.neutral { background: var(--text-muted); }
 
 /* ── 16. Health Bar ── */
-.health-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+.health-bar { display: flex; flex-wrap: wrap; gap: 4px; }
 .health-probe {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 10px; border-radius: var(--radius-sm);
-    background: var(--bg-input); border: 1px solid rgba(80, 100, 130, 0.08);
-    font-size: 11px; transition: border-color var(--transition);
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 8px; border-radius: var(--radius-sm);
+    background: var(--bg-input); border: 1px solid rgba(80, 100, 130, 0.06);
+    font-size: 10px; transition: border-color var(--transition);
 }
 .health-dot {
-    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
 }
 .health-dot.ok { background: var(--bullish); box-shadow: 0 0 4px rgba(16, 185, 129, 0.5); }
 .health-dot.degraded { background: var(--warning); box-shadow: 0 0 4px rgba(245, 158, 11, 0.5); }
@@ -435,16 +528,16 @@ a:hover { color: var(--accent); }
 .health-dot.unknown { background: var(--text-muted); }
 .health-probe-name { font-weight: 500; color: var(--text-secondary); }
 
-/* ── 17. Status Bar (底部) ── */
+/* ── 17. Status Bar ── */
 .status-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 16px;
-    background: rgba(8, 12, 22, 0.95);
+    padding: 5px 14px;
+    background: rgba(6, 10, 18, 0.96);
     border: 1px solid var(--border-panel);
     border-radius: var(--radius);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     font-size: 10px;
     font-family: var(--font-mono);
     color: var(--text-muted);
@@ -453,16 +546,16 @@ a:hover { color: var(--accent); }
 .status-bar-left { display: flex; align-items: center; gap: 6px; }
 .status-bar-sep { color: rgba(80, 100, 130, 0.3); }
 .status-indicator {
-    width: 6px; height: 6px; border-radius: 50%;
+    width: 5px; height: 5px; border-radius: 50%;
     animation: blink-dot 2s infinite;
 }
 .status-indicator.ok { background: var(--bullish); box-shadow: 0 0 4px rgba(16, 185, 129, 0.5); }
 .status-indicator.degraded { background: var(--warning); }
 .status-bar-btn {
     background: linear-gradient(135deg, var(--primary), var(--accent));
-    color: #060a14;
+    color: #040810;
     border: none;
-    padding: 4px 14px;
+    padding: 3px 12px;
     border-radius: var(--radius-sm);
     font-size: 10px;
     font-weight: 700;
@@ -474,7 +567,7 @@ a:hover { color: var(--accent); }
 .status-bar-btn:hover { box-shadow: 0 0 16px rgba(0, 212, 255, 0.3); transform: translateY(-1px); }
 .status-bar-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-/* ── 18. Text Color Utilities ── */
+/* ── 18. Utilities ── */
 .text-bullish { color: var(--bullish) !important; }
 .text-bearish { color: var(--bearish) !important; }
 .text-neutral { color: var(--neutral) !important; }
@@ -482,7 +575,6 @@ a:hover { color: var(--accent); }
 .negative { color: var(--bearish); }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-/* ── 19. Price Display (通用) ── */
 .price-current, .price {
     font-family: var(--font-mono); font-size: 28px; font-weight: 700;
     color: var(--text-primary); line-height: 1.2;
@@ -499,7 +591,7 @@ a:hover { color: var(--accent); }
     margin-top: 2px; font-family: var(--font-mono);
 }
 
-/* ── 20. Form Styles ── */
+/* ── 19. Forms ── */
 .config-page { max-width: 800px; margin: 0 auto; }
 .page-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: var(--text-primary); }
 .form-group { margin-bottom: 12px; }
@@ -535,7 +627,7 @@ select.input { cursor: pointer; }
     text-align: right; font-family: var(--font-mono); font-size: 12px;
 }
 
-/* ── 21. Buttons ── */
+/* ── 20. Buttons ── */
 .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 4px;
     padding: 8px 16px; border-radius: var(--radius-sm); border: none;
@@ -544,7 +636,7 @@ select.input { cursor: pointer; }
 }
 .btn-primary {
     background: linear-gradient(135deg, var(--primary), var(--accent));
-    color: #060a14; font-weight: 600;
+    color: #040810; font-weight: 600;
     box-shadow: 0 0 12px rgba(0, 212, 255, 0.15);
 }
 .btn-primary:hover { box-shadow: 0 0 20px rgba(0, 212, 255, 0.3); transform: translateY(-1px); }
@@ -560,7 +652,7 @@ select.input { cursor: pointer; }
 .result-msg.success { color: var(--bullish); }
 .result-msg.error { color: var(--bearish); }
 
-/* ── 22. Symbol Tags (config page) ── */
+/* ── 21. Symbol Tags ── */
 .symbol-tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 28px; }
 .symbol-tag {
     display: inline-flex; align-items: center; gap: 3px;
@@ -582,16 +674,16 @@ select.input { cursor: pointer; }
 }
 .btn-preset:hover { border-color: var(--primary-dim); color: var(--primary); background: var(--primary-glow); }
 
-/* ── 23. Data Tables ── */
+/* ── 22. Data Tables ── */
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th {
-    text-align: left; padding: 8px 10px;
+    text-align: left; padding: 6px 8px;
     color: var(--text-muted); font-size: 10px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.5px;
     border-bottom: 1px solid var(--border-panel);
     background: rgba(0, 212, 255, 0.02);
 }
-.data-table td { padding: 8px 10px; border-bottom: 1px solid rgba(80, 100, 130, 0.06); }
+.data-table td { padding: 6px 8px; border-bottom: 1px solid rgba(80, 100, 130, 0.04); }
 .data-table tr { transition: background var(--transition); }
 .data-table tr:hover { background: rgba(0, 212, 255, 0.02); }
 td.bullish { color: var(--bullish); }
@@ -602,21 +694,21 @@ td.bearish { color: var(--bearish); }
 .stat-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); color: var(--primary); }
 .stat-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 
-/* ── 24. Log Viewer ── */
+/* ── 23. Log Viewer ── */
 .logs-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .log-card { padding: 0; }
 .log-content {
     font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
-    padding: 12px; margin: 0; max-height: 75vh;
+    padding: 10px; margin: 0; max-height: 75vh;
     overflow-y: auto; color: var(--text-secondary);
-    white-space: pre; background: rgba(6, 10, 20, 0.8);
+    white-space: pre; background: rgba(4, 8, 16, 0.8);
     border-radius: 0 0 var(--radius) var(--radius);
 }
 .log-error { color: var(--bearish); }
 .log-warn { color: var(--warning); }
 .log-ok { color: var(--bullish); }
 
-/* ── 25. Setup Wizard ── */
+/* ── 24. Setup Wizard ── */
 .setup-wizard { max-width: 600px; margin: 32px auto; }
 .subtitle { color: var(--text-secondary); margin-bottom: 20px; font-size: 14px; }
 .step { display: none; }
@@ -632,25 +724,26 @@ td.bearish { color: var(--bearish); }
 .preset-card:hover { border-color: var(--primary-dim); box-shadow: var(--glow-sm); }
 .preset-card.selected { border-color: var(--primary); background: rgba(0, 212, 255, 0.04); }
 
-/* ── 26. Animations ── */
+/* ── 25. Animations ── */
 @keyframes pulse-glow {
     0%, 100% { box-shadow: 0 0 3px rgba(0, 212, 255, 0.08); }
     50% { box-shadow: 0 0 12px rgba(0, 212, 255, 0.18); }
 }
-@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes number-pop { 0% { transform: scale(1); } 40% { transform: scale(1.03); } 100% { transform: scale(1); } }
 @keyframes blink-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-/* ── 27. Responsive ── */
+/* ── 26. Responsive ── */
 @media (max-width: 1200px) {
     .overview-strip { grid-template-columns: repeat(3, 1fr); }
     .analysis-grid { grid-template-columns: 1fr 1fr; }
     .market-grid { grid-template-columns: repeat(2, 1fr); }
+    .bottom-grid-3 { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 768px) {
-    .container { padding: 44px 8px 8px; }
-    .navbar { padding: 0 10px; height: 36px; }
-    .overview-strip, .analysis-grid, .market-grid, .bottom-grid, .form-row, .levels-grid {
+    .container { padding: 42px 6px 6px; }
+    .navbar { padding: 0 8px; height: 36px; }
+    .overview-strip, .analysis-grid, .market-grid, .bottom-grid, .bottom-grid-3, .form-row, .levels-grid {
         grid-template-columns: 1fr;
     }
     .nav-links a { padding: 3px 6px; font-size: 10px; }
@@ -659,7 +752,7 @@ td.bearish { color: var(--bearish); }
     .status-bar { flex-direction: column; gap: 6px; text-align: center; }
 }
 
-/* ── 28. Scrollbar ── */
+/* ── 27. Scrollbar ── */
 * { scrollbar-width: thin; scrollbar-color: rgba(0, 212, 255, 0.12) transparent; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
