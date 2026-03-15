@@ -132,27 +132,24 @@ ok "配置文件已生成 (.env)"
 mkdir -p data/logs
 ok "数据目录已创建 (data/)"
 
-# 如果没有 docker-compose.yml，下载它
-if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.prod.yml" ]; then
-    info "下载 docker-compose 配置..."
-    if command -v curl &>/dev/null; then
-        curl -fsSL "${REPO_URL}/raw/main/docker-compose.prod.yml" -o docker-compose.yml 2>/dev/null || true
-    elif command -v wget &>/dev/null; then
-        wget -q -O docker-compose.yml "${REPO_URL}/raw/main/docker-compose.prod.yml" 2>/dev/null || true
+# 如果本地没有 Dockerfile，自动 clone 仓库源码
+if [ ! -f "Dockerfile" ]; then
+    info "未检测到源码，正在从 GitHub 克隆仓库..."
+    if command -v git &>/dev/null; then
+        git clone "${REPO_URL}.git" _repo_tmp 2>/dev/null
+    else
+        err "未安装 git，请先安装: apt install -y git"
+        exit 1
     fi
+    # 将仓库文件移到当前目录（保留已生成的 .env 和 data/）
+    cp -rn _repo_tmp/* _repo_tmp/.dockerignore _repo_tmp/.gitignore . 2>/dev/null || true
+    rm -rf _repo_tmp
+    ok "源码已就绪"
 fi
 
-# 如果本地有 Dockerfile，优先本地构建
-if [ -f "Dockerfile" ]; then
-    DEPLOY_MODE="build"
-    info "检测到 Dockerfile，将使用本地构建模式"
-    COMPOSE_FILE="docker-compose.yml"
-else
-    DEPLOY_MODE="pull"
-    info "使用远程镜像模式"
-    COMPOSE_FILE="docker-compose.prod.yml"
-    [ ! -f "$COMPOSE_FILE" ] && COMPOSE_FILE="docker-compose.yml"
-fi
+DEPLOY_MODE="build"
+info "使用本地构建模式"
+COMPOSE_FILE="docker-compose.yml"
 
 echo ""
 
