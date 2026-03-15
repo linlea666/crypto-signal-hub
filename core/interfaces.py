@@ -122,12 +122,15 @@ class AIProvider(ABC):
     """AI 分析提供者接口"""
 
     @abstractmethod
-    async def analyze(self, snapshot_dict: dict, score_summary: str) -> str:
+    async def analyze(
+        self, snapshot_dict: dict, score_summary: str, trade_summary: str = "",
+    ) -> str:
         """基于结构化数据生成分析文本。
 
         Args:
             snapshot_dict: MarketSnapshot 的字典形式
             score_summary: 评分引擎的结构化摘要
+            trade_summary: 量化交易建议摘要（可选，为空时 AI 自行判断）
 
         Returns:
             AI 生成的自然语言分析报告

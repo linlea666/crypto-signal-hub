@@ -135,6 +135,28 @@ def _default_render(report: SignalReport) -> str:
     env = Environment(loader=FileSystemLoader(str(template_dir)))
 
     try:
+        # 序列化交易建议以便模板消费
+        trade_ctx = None
+        ts = report.trade_suggestion
+        if ts is not None:
+            direction_cn = {"bullish": "做多", "bearish": "做空"}
+            size_cn = {"skip": "不建议", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+            trade_ctx = {
+                "direction": ts.direction.value,
+                "direction_label": direction_cn.get(ts.direction.value, ""),
+                "entry_low": ts.entry_low,
+                "entry_high": ts.entry_high,
+                "stop_loss": ts.stop_loss,
+                "take_profit_1": ts.take_profit_1,
+                "take_profit_2": ts.take_profit_2,
+                "risk_reward_1": ts.risk_reward_1,
+                "risk_reward_2": ts.risk_reward_2,
+                "position_label": size_cn.get(ts.position_size.value, ""),
+                "tp1_source": ts.tp1_source,
+                "tp2_source": ts.tp2_source,
+                "reasoning": ts.reasoning,
+            }
+
         tpl = env.get_template("email_report.html")
         return tpl.render(
             symbol=report.symbol,
@@ -149,6 +171,7 @@ def _default_render(report: SignalReport) -> str:
                 for fs in report.factor_scores
             ],
             levels=report.key_levels,
+            trade=trade_ctx,
             ai_analysis=report.ai_analysis or "",
             timestamp=report.timestamp.strftime("%Y-%m-%d %H:%M"),
         )

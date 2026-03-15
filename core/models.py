@@ -17,6 +17,7 @@ from core.constants import (
     FactorName,
     FundingRateLevel,
     OIPriceSignal,
+    PositionSize,
     SignalStrength,
 )
 
@@ -176,14 +177,24 @@ class KeyLevels:
 
 @dataclass(frozen=True)
 class TradeSuggestion:
-    """交易建议（仅供参考）"""
-    direction: Direction
-    entry_price: float
-    stop_loss: float
-    take_profit_1: float
-    take_profit_2: float | None = None
-    risk_reward_ratio: float = 0.0
-    reasoning: str = ""
+    """交易建议——基于支撑阻力位自动推导（小亏大赚原则）。
+
+    当盈亏比 < 1.5 时 position_size 为 SKIP，表示当前位置不适合开仓。
+    所有价格字段均为 USD 绝对价格，非百分比。
+    """
+    direction: Direction            # 建议方向（与信号方向一致）
+    entry_low: float                # 开仓区间下限（回调入场价）
+    entry_high: float               # 开仓区间上限（当前价附近）
+    stop_loss: float                # 止损价
+    take_profit_1: float            # 保守止盈（最近阻力/支撑）
+    take_profit_2: float            # 激进止盈（更远的强阻力/支撑）
+    risk_reward_1: float            # 保守盈亏比
+    risk_reward_2: float            # 激进盈亏比
+    position_size: PositionSize     # 仓位建议
+    sl_source: str = ""             # 止损参考来源（如 "60日均线下方1%"）
+    tp1_source: str = ""            # 保守止盈参考来源
+    tp2_source: str = ""            # 激进止盈参考来源
+    reasoning: str = ""             # 综合建议理由
 
 
 @dataclass(frozen=True)

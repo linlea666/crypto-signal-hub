@@ -94,6 +94,68 @@
   </td></tr>
   {% endif %}
 
+  <!-- Trade Suggestion -->
+  {% if trade %}
+  <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
+  <tr><td style="padding:20px 30px">
+    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">交易建议（小亏大赚）</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:8px;overflow:hidden">
+      <tr>
+        <td style="padding:12px 16px;border-bottom:1px solid #1e293b">
+          <span style="font-size:11px;color:#64748b">方向</span><br>
+          <span style="font-size:16px;font-weight:700;color:{{ '#10b981' if trade.direction == 'bullish' else '#ef4444' }}">
+            {{ trade.direction_label }}
+          </span>
+          <span style="font-size:12px;color:#94a3b8;margin-left:8px">{{ trade.position_label }}</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px;border-bottom:1px solid #1e293b">
+          <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="33%" style="vertical-align:top">
+              <span style="font-size:10px;color:#64748b;text-transform:uppercase">入场区间</span><br>
+              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.entry_low) }} — ${{ "%.0f"|format(trade.entry_high) }}</span>
+            </td>
+            <td width="33%" style="vertical-align:top">
+              <span style="font-size:10px;color:#ef4444;text-transform:uppercase">止损</span><br>
+              <span style="font-size:13px;color:#ef4444;font-weight:600;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.stop_loss) }}</span>
+            </td>
+            <td width="33%" style="vertical-align:top;text-align:right">
+              <span style="font-size:10px;color:#10b981;text-transform:uppercase">盈亏比</span><br>
+              <span style="font-size:13px;color:#10b981;font-weight:600;font-family:'Courier New',monospace">{{ "%.1f"|format(trade.risk_reward_1) }}:1 / {{ "%.1f"|format(trade.risk_reward_2) }}:1</span>
+            </td>
+          </tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:12px 16px">
+          <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="50%" style="vertical-align:top">
+              <span style="font-size:10px;color:#10b981;text-transform:uppercase">保守止盈</span><br>
+              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.take_profit_1) }}</span>
+              <span style="font-size:10px;color:#64748b"> ({{ trade.tp1_source }})</span>
+            </td>
+            <td width="50%" style="vertical-align:top">
+              <span style="font-size:10px;color:#10b981;text-transform:uppercase">激进止盈</span><br>
+              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.take_profit_2) }}</span>
+              {% if trade.tp2_source %}<span style="font-size:10px;color:#64748b"> ({{ trade.tp2_source }})</span>{% endif %}
+            </td>
+          </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    {% if trade.reasoning %}
+    <div style="margin-top:8px;font-size:12px;color:#94a3b8;padding:8px 12px;border-left:2px solid #00d4ff;background:rgba(0,212,255,0.03)">
+      {{ trade.reasoning }}
+    </div>
+    {% endif %}
+  </td></tr>
+  {% endif %}
+
   <!-- AI Analysis -->
   {% if ai_analysis %}
   <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>

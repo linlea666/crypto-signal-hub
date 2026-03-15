@@ -197,7 +197,15 @@ class JobScheduler:
             )
 
     async def _run_signal_backtest(self, window: str = "4h", hours_ago: int = 4) -> None:
-        """多窗口回测验证历史信号"""
+        """K 线回溯回测：用信号发出后的 OHLCV 数据判定止盈/止损命中。
+
+        回测逻辑：
+        1. 读取信号的入场价、止损价、止盈价
+        2. 获取信号发出后至今的 1h K 线数据
+        3. 按时间顺序遍历每根 K 线，检查最高价/最低价是否触及 SL/TP
+        4. 先触达止损 → sl_hit；先触达 TP1 → tp1_hit；先触达 TP2 → tp2_hit
+        5. 窗口期内均未触达 → 退化为方向判断（correct_dir / wrong_dir）
+        """
         import ccxt.async_support as ccxt
 
         unverified = self._db.get_unverified_signals(hours_ago=hours_ago, window=window)
@@ -206,45 +214,134 @@ class JobScheduler:
 
         logger.info("回测[%s]: 检查 %d 条信号", window, len(unverified))
 
-        ex = ccxt.okx({"enableRateLimit": True, "timeout": 8000})
+        ex = ccxt.okx({"enableRateLimit": True, "timeout": 10000})
         try:
             for signal in unverified:
                 try:
-                    symbol = signal["symbol"]
-                    direction = signal["direction"]
-                    snapshot = json.loads(signal.get("snapshot_json", "{}"))
-                    entry_price = snapshot.get("price", {}).get("current", 0)
-                    if not entry_price:
-                        continue
-
-                    ticker = await ex.fetch_ticker(symbol)
-                    current_price = ticker.get("last", 0)
-                    if not current_price:
-                        continue
-
-                    change_pct = ((current_price - entry_price) / entry_price) * 100
-
-                    if direction == "bullish":
-                        correct = change_pct > 0
-                    elif direction == "bearish":
-                        correct = change_pct < 0
-                    else:
-                        correct = abs(change_pct) < 1.0
-
-                    self._db.update_signal_outcome(
-                        signal["id"], current_price, correct,
-                        window=window, change_pct=change_pct,
-                    )
-                    logger.info(
-                        "回测[%s] %s: %s %.0f→%.0f (%+.2f%%) %s",
-                        window, signal["id"][:8], direction,
-                        entry_price, current_price, change_pct,
-                        "✓" if correct else "✗",
-                    )
+                    await self._backtest_one_signal(ex, signal, window, hours_ago)
                 except Exception as e:
                     logger.warning("回测[%s] %s 失败: %s", window, signal["id"][:8], e)
         finally:
             await ex.close()
+
+    async def _backtest_one_signal(
+        self, exchange, signal: dict, window: str, hours_ago: int,
+    ) -> None:
+        """对单条信号执行基于 K 线的回测。"""
+        symbol = signal["symbol"]
+        direction = signal["direction"]
+        snapshot = json.loads(signal.get("snapshot_json", "{}"))
+        entry_price = snapshot.get("price", {}).get("current", 0)
+        if not entry_price:
+            return
+
+        # 尝试从 suggestion_json 提取 SL/TP（交易建议保存在这里）
+        suggestion = {}
+        raw_sug = signal.get("suggestion_json", "")
+        if raw_sug:
+            try:
+                suggestion = json.loads(raw_sug)
+                if not isinstance(suggestion, dict):
+                    suggestion = {}
+            except (json.JSONDecodeError, TypeError):
+                suggestion = {}
+
+        stop_loss = suggestion.get("stop_loss", 0)
+        tp1 = suggestion.get("take_profit_1", 0)
+        tp2 = suggestion.get("take_profit_2", 0)
+
+        # 获取信号发出后的 1h K 线（窗口期 = hours_ago 小时）
+        since_ts = self._iso_to_ms(signal["timestamp"])
+        if not since_ts:
+            return
+
+        candles = await exchange.fetch_ohlcv(
+            symbol, timeframe="1h", since=since_ts, limit=hours_ago + 1,
+        )
+        if not candles:
+            return
+
+        last_candle = candles[-1]
+        current_price = last_candle[4]  # close
+        change_pct = ((current_price - entry_price) / entry_price) * 100
+
+        # 有 SL/TP 时：逐 K 线检测命中
+        outcome = self._evaluate_candles(
+            direction, entry_price, stop_loss, tp1, tp2, candles,
+        )
+
+        # 无交易建议时退化为方向判断
+        if outcome == "expired" and not stop_loss:
+            if direction == "bullish":
+                outcome = "correct_dir" if change_pct > 0 else "wrong_dir"
+            elif direction == "bearish":
+                outcome = "correct_dir" if change_pct < 0 else "wrong_dir"
+
+        correct = outcome in ("tp1_hit", "tp2_hit", "correct_dir")
+
+        self._db.update_signal_outcome(
+            signal["id"], window=window, outcome=outcome,
+            price_after=current_price, change_pct=change_pct, correct=correct,
+        )
+
+        outcome_symbol = {"tp1_hit": "🎯T1", "tp2_hit": "🎯T2", "sl_hit": "💔SL",
+                          "correct_dir": "✓", "wrong_dir": "✗", "expired": "⏳"}
+        logger.info(
+            "回测[%s] %s: %s %.0f→%.0f (%+.2f%%) %s",
+            window, signal["id"][:8], direction,
+            entry_price, current_price, change_pct,
+            outcome_symbol.get(outcome, outcome),
+        )
+
+    @staticmethod
+    def _evaluate_candles(
+        direction: str, entry: float,
+        sl: float, tp1: float, tp2: float,
+        candles: list,
+    ) -> str:
+        """逐 K 线遍历，判断先触达止损还是止盈。
+
+        K 线格式: [timestamp, open, high, low, close, volume]
+        做多: low <= SL → sl_hit; high >= TP → tp_hit
+        做空: high >= SL → sl_hit; low <= TP → tp_hit
+        """
+        if not sl and not tp1:
+            return "expired"
+
+        tp2_hit = False
+        tp1_hit = False
+
+        for candle in candles:
+            high = candle[2]
+            low = candle[3]
+
+            if direction == "bullish":
+                if sl and low <= sl:
+                    return "sl_hit"
+                if tp2 and high >= tp2:
+                    return "tp2_hit"
+                if tp1 and high >= tp1:
+                    tp1_hit = True
+            elif direction == "bearish":
+                if sl and high >= sl:
+                    return "sl_hit"
+                if tp2 and low <= tp2:
+                    return "tp2_hit"
+                if tp1 and low <= tp1:
+                    tp1_hit = True
+
+        if tp1_hit:
+            return "tp1_hit"
+        return "expired"
+
+    @staticmethod
+    def _iso_to_ms(iso_str: str) -> int | None:
+        """将 ISO 时间字符串转为毫秒时间戳（ccxt 需要）"""
+        try:
+            dt = datetime.fromisoformat(iso_str)
+            return int(dt.timestamp() * 1000)
+        except (ValueError, TypeError):
+            return None
 
     async def _run_daily_stats(self) -> None:
         """每日 21:00 推送回测统计"""
@@ -298,10 +395,11 @@ class JobScheduler:
                 report.signal_strength in (SignalStrength.STRONG, SignalStrength.MODERATE)
                 or alert_type == AlertType.DAILY_REPORT
             ):
-                from analyzer.reporter import build_score_summary
+                from analyzer.reporter import build_score_summary, build_trade_summary
                 summary = build_score_summary(report)
+                trade_summary = build_trade_summary(report)
                 ai_text = await self._ai_reporter.analyze(
-                    snapshot.to_dict(), summary
+                    snapshot.to_dict(), summary, trade_summary
                 )
                 report = SignalReport(
                     id=report.id,
@@ -315,6 +413,7 @@ class JobScheduler:
                     confidence=report.confidence,
                     signal_strength=report.signal_strength,
                     key_levels=report.key_levels,
+                    trade_suggestion=report.trade_suggestion,
                     ai_analysis=ai_text,
                     alert_type=alert_type,
                 )
@@ -416,4 +515,30 @@ class JobScheduler:
                 "supports": [_level_dict(lv) for lv in report.key_levels.supports],
                 "resistances": [_level_dict(lv) for lv in report.key_levels.resistances],
             },
+            "trade": _serialize_trade(report.trade_suggestion),
+        }
+
+    @staticmethod
+    def _serialize_trade(ts) -> dict | None:
+        """将 TradeSuggestion 序列化为模板可消费的字典"""
+        if ts is None:
+            return None
+        direction_cn = {"bullish": "做多", "bearish": "做空", "neutral": "观望"}
+        size_cn = {"skip": "不建议", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+        return {
+            "direction": ts.direction.value,
+            "direction_label": direction_cn.get(ts.direction.value, ts.direction.value),
+            "entry_low": ts.entry_low,
+            "entry_high": ts.entry_high,
+            "stop_loss": ts.stop_loss,
+            "take_profit_1": ts.take_profit_1,
+            "take_profit_2": ts.take_profit_2,
+            "risk_reward_1": ts.risk_reward_1,
+            "risk_reward_2": ts.risk_reward_2,
+            "position_size": ts.position_size.value,
+            "position_label": size_cn.get(ts.position_size.value, ts.position_size.value),
+            "sl_source": ts.sl_source,
+            "tp1_source": ts.tp1_source,
+            "tp2_source": ts.tp2_source,
+            "reasoning": ts.reasoning,
         }

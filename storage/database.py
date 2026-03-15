@@ -111,7 +111,7 @@ class Database:
                     json.dumps(report_data["snapshot"], ensure_ascii=False),
                     json.dumps(report_data["scores"], ensure_ascii=False),
                     json.dumps(report_data["levels"], ensure_ascii=False),
-                    json.dumps(report_data.get("suggestion", ""), ensure_ascii=False),
+                    json.dumps(report_data.get("trade") or "", ensure_ascii=False),
                 ),
             )
 
@@ -171,8 +171,7 @@ class Database:
             result["snapshot"] = json.loads(result.pop("snapshot_json"))
             result["scores"] = json.loads(result.pop("scores_json"))
             result["levels"] = json.loads(result.pop("levels_json"))
-            suggestion_raw = result.pop("suggestion_json", "")
-            result["suggestion"] = json.loads(suggestion_raw) if suggestion_raw else None
+            result.update(self._parse_suggestion_json(result.pop("suggestion_json", "")))
             return result
 
     def get_latest_report(self, symbol: str) -> dict | None:
@@ -189,9 +188,31 @@ class Database:
             result["snapshot"] = json.loads(result.pop("snapshot_json"))
             result["scores"] = json.loads(result.pop("scores_json"))
             result["levels"] = json.loads(result.pop("levels_json"))
-            suggestion_raw = result.pop("suggestion_json", "")
-            result["suggestion"] = json.loads(suggestion_raw) if suggestion_raw else None
+            result.update(self._parse_suggestion_json(result.pop("suggestion_json", "")))
             return result
+
+    @staticmethod
+    def _parse_suggestion_json(raw: str) -> dict:
+        """解析 suggestion_json，分离出 trade 建议和回测结果。
+
+        suggestion_json 存储格式示例:
+        {"direction": "bullish", "entry_low": ..., "4h": {"outcome": ...}, ...}
+
+        返回 {"trade": {...} or None, "backtest_results": {...}}
+        """
+        if not raw:
+            return {"trade": None}
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return {"trade": None}
+        except (json.JSONDecodeError, TypeError):
+            return {"trade": None}
+
+        # trade 建议字段标识：含 direction + entry_low
+        if "direction" in data and "entry_low" in data:
+            return {"trade": data}
+        return {"trade": None}
 
     def count_emails_today(self) -> int:
         """统计今日已发送邮件数"""
@@ -243,10 +264,15 @@ class Database:
             }
 
     def update_signal_outcome(
-        self, report_id: str, price_after: float, correct: bool,
-        window: str = "4h", change_pct: float = 0.0,
+        self, report_id: str, window: str,
+        outcome: str, price_after: float,
+        change_pct: float = 0.0, correct: bool = False,
     ) -> None:
-        """记录信号回测结果（支持多时间窗口: 4h/12h/24h）"""
+        """记录单窗口回测结果。
+
+        outcome 取值: tp1_hit / tp2_hit / sl_hit / expired / correct_dir / wrong_dir
+        保留 correct 布尔值用于兼容统计查询。
+        """
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT suggestion_json FROM signal_reports WHERE id = ?",
@@ -262,15 +288,11 @@ class Database:
                     existing = {}
 
             existing[window] = {
+                "outcome": outcome,
                 "price_after": price_after,
                 "correct": correct,
                 "change_pct": round(change_pct, 3),
             }
-            if "correct" not in existing:
-                best = existing.get("24h") or existing.get("12h") or existing.get("4h")
-                if best:
-                    existing["correct"] = best["correct"]
-                    existing["price_after"] = best["price_after"]
 
             conn.execute(
                 "UPDATE signal_reports SET suggestion_json = ? WHERE id = ?",

@@ -350,6 +350,114 @@ a:hover { color: var(--accent); }
     line-height: 1.2;
 }
 
+/* ── 7b. Trade Suggestion Strip ── */
+.trade-suggestion-strip {
+    margin-bottom: var(--gap);
+}
+
+.trade-grid {
+    display: grid;
+    grid-template-columns: auto 1.3fr 1fr 1fr 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.trade-col {
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    background: rgba(8, 14, 26, 0.5);
+    border: 1px solid rgba(80, 100, 130, 0.06);
+}
+
+.trade-direction-col {
+    text-align: center;
+    padding: 8px 14px;
+    background: transparent;
+    border: none;
+}
+
+.trade-direction-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+.trade-direction-badge.bullish {
+    background: var(--bullish-bg);
+    color: var(--bullish);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.trade-direction-badge.bearish {
+    background: var(--bearish-bg);
+    color: var(--bearish);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.trade-direction-badge.neutral {
+    background: var(--neutral-bg);
+    color: var(--neutral);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.trade-position {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-weight: 600;
+}
+.trade-position.skip {
+    color: var(--bearish);
+}
+
+.trade-col-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 3px;
+    font-weight: 600;
+}
+
+.trade-col-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.trade-col-source {
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-family: var(--font-mono);
+}
+
+.trade-rr-group {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+.trade-rr {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+}
+.trade-rr-sep {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.trade-reasoning {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--primary-dim);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--primary-glow);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
 /* ── 8. Placeholder ── */
 .panel-placeholder {
     display: flex;
@@ -739,11 +847,12 @@ td.bearish { color: var(--bearish); }
     .analysis-grid { grid-template-columns: 1fr 1fr; }
     .market-grid { grid-template-columns: repeat(2, 1fr); }
     .bottom-grid-3 { grid-template-columns: 1fr 1fr; }
+    .trade-grid { grid-template-columns: auto 1fr 1fr 1fr; }
 }
 @media (max-width: 768px) {
     .container { padding: 42px 6px 6px; }
     .navbar { padding: 0 8px; height: 36px; }
-    .overview-strip, .analysis-grid, .market-grid, .bottom-grid, .bottom-grid-3, .form-row, .levels-grid {
+    .overview-strip, .analysis-grid, .market-grid, .bottom-grid, .bottom-grid-3, .form-row, .levels-grid, .trade-grid {
         grid-template-columns: 1fr;
     }
     .nav-links a { padding: 3px 6px; font-size: 10px; }

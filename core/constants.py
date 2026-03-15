@@ -67,6 +67,26 @@ class AlertType(str, Enum):
     ANOMALY = "anomaly"
 
 
+class TradeOutcome(str, Enum):
+    """回测结果：信号最终触达了哪个目标"""
+    TP1_HIT = "tp1_hit"            # 保守止盈命中
+    TP2_HIT = "tp2_hit"            # 激进止盈命中
+    SL_HIT = "sl_hit"              # 止损命中
+    EXPIRED = "expired"            # 窗口期内未触及任何目标
+    PENDING = "pending"            # 尚未回测
+
+
+class PositionSize(str, Enum):
+    """仓位建议等级"""
+    SKIP = "skip"      # 盈亏比不达标，不建议开仓
+    LIGHT = "light"    # 轻仓（盈亏比 1.5~2）
+    NORMAL = "normal"  # 标准（盈亏比 2~3）
+    HEAVY = "heavy"    # 重仓（盈亏比 > 3 且信心度高）
+
+
+# 盈亏比阈值——低于此值不给出交易建议（小亏大赚原则）
+MIN_RISK_REWARD_RATIO = 1.5
+
 # ── 评分边界常量 ──
 # 各因子默认满分，可在配置中覆盖
 DEFAULT_FACTOR_WEIGHTS: dict[FactorName, float] = {

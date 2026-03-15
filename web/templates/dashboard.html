@@ -21,6 +21,7 @@
 {% set oi = derivs.get('open_interest', {}) or {} %}
 {% set ls = derivs.get('long_short', {}) or {} %}
 {% set opts = snap.get('options') or {} %}
+{% set trade = (report.get('trade') if report else none) %}
 {% set has_data = report is not none %}
 {% set report_time = report.get('timestamp', '')[:16] if report else '' %}
 
@@ -202,6 +203,79 @@
             {% else %}
             <div>分析后显示 AI 智能解读</div>
             {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ═══ Row 2.5: 交易建议 ═══ -->
+<div class="trade-suggestion-strip">
+    <div class="card card-sm">
+        <div class="card-title">交易建议（小亏大赚） {{ panel_time() }}</div>
+        {% if trade %}
+        {% set is_skip = trade.get('position_size') == 'skip' %}
+        <div class="trade-grid">
+            <!-- 方向 + 仓位 -->
+            <div class="trade-col trade-direction-col">
+                <div class="trade-direction-badge {{ trade.direction }}">
+                    {{ trade.direction_label }}
+                </div>
+                <div class="trade-position {{ 'skip' if is_skip else '' }}">
+                    {{ trade.position_label }}
+                </div>
+            </div>
+
+            <!-- 入场区间 -->
+            <div class="trade-col">
+                <div class="trade-col-label">入场区间</div>
+                <div class="trade-col-value mono">
+                    ${{ "%.0f"|format(trade.entry_low) }} — ${{ "%.0f"|format(trade.entry_high) }}
+                </div>
+            </div>
+
+            <!-- 止损 -->
+            <div class="trade-col trade-sl">
+                <div class="trade-col-label">止损</div>
+                <div class="trade-col-value mono text-bearish">${{ "%.0f"|format(trade.stop_loss) }}</div>
+                <div class="trade-col-source">{{ trade.sl_source }}</div>
+            </div>
+
+            <!-- 保守止盈 -->
+            <div class="trade-col trade-tp">
+                <div class="trade-col-label">保守止盈</div>
+                <div class="trade-col-value mono text-bullish">${{ "%.0f"|format(trade.take_profit_1) }}</div>
+                <div class="trade-col-source">{{ trade.tp1_source }}</div>
+            </div>
+
+            <!-- 激进止盈 -->
+            <div class="trade-col trade-tp">
+                <div class="trade-col-label">激进止盈</div>
+                <div class="trade-col-value mono text-bullish">${{ "%.0f"|format(trade.take_profit_2) }}</div>
+                <div class="trade-col-source">{{ trade.tp2_source }}</div>
+            </div>
+
+            <!-- 盈亏比 -->
+            <div class="trade-col">
+                <div class="trade-col-label">盈亏比</div>
+                <div class="trade-rr-group">
+                    <span class="trade-rr mono {{ 'text-bullish' if trade.risk_reward_1 >= 2 else ('text-bearish' if trade.risk_reward_1 < 1.5 else '') }}">
+                        {{ "%.1f"|format(trade.risk_reward_1) }}:1
+                    </span>
+                    <span class="trade-rr-sep">/</span>
+                    <span class="trade-rr mono {{ 'text-bullish' if trade.risk_reward_2 >= 2 else '' }}">
+                        {{ "%.1f"|format(trade.risk_reward_2) }}:1
+                    </span>
+                </div>
+                <div class="trade-col-source">保守 / 激进</div>
+            </div>
+        </div>
+        {% if trade.reasoning %}
+        <div class="trade-reasoning">{{ trade.reasoning }}</div>
+        {% endif %}
+        {% else %}
+        <div class="panel-placeholder" style="min-height:60px">
+            <div class="placeholder-icon" style="font-size:18px">◈</div>
+            <div>分析后显示交易建议（中性信号不给出建议）</div>
         </div>
         {% endif %}
     </div>

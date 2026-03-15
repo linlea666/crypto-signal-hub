@@ -26,6 +26,7 @@ from core.models import (
 )
 from engine.confidence import calculate_confidence
 from engine.levels import identify_key_levels
+from engine.trade_advisor import derive_trade_suggestion
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,14 @@ class SignalScorer:
         # 6. 识别关键价位
         key_levels = identify_key_levels(snapshot)
 
+        # 7. 推导交易建议（纯计算，从关键位和方向自动得出）
+        trade_suggestion = derive_trade_suggestion(
+            direction=direction,
+            confidence=confidence,
+            price=snapshot.price,
+            levels=key_levels,
+        )
+
         return SignalReport(
             id=str(uuid.uuid4()),
             timestamp=snapshot.timestamp,
@@ -82,6 +91,7 @@ class SignalScorer:
             confidence=round(confidence, 1),
             signal_strength=strength,
             key_levels=key_levels,
+            trade_suggestion=trade_suggestion,
         )
 
     def _calculate_all_factors(
