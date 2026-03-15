@@ -18,7 +18,7 @@
 
 ```bash
 mkdir -p ~/cryptosignal && cd ~/cryptosignal && \
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/crypto-signal-hub/main/deploy.sh -o deploy.sh && \
+curl -fsSL https://raw.githubusercontent.com/linlea666/crypto-signal-hub/main/deploy.sh -o deploy.sh && \
 chmod +x deploy.sh && ./deploy.sh
 ```
 
@@ -27,7 +27,7 @@ chmod +x deploy.sh && ./deploy.sh
 ### 📦 方式二：Docker Compose（Clone 代码）
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/crypto-signal-hub.git
+git clone https://github.com/linlea666/crypto-signal-hub.git
 cd crypto-signal-hub
 cp .env.example .env
 # 编辑 .env 填入你的配置

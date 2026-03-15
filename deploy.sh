@@ -15,7 +15,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 APP_NAME="CryptoSignal Hub"
-REPO_URL="https://github.com/YOUR_USERNAME/crypto-signal-hub"
+REPO_URL="https://github.com/linlea666/crypto-signal-hub"
 INSTALL_DIR="$(pwd)"
 
 echo ""
