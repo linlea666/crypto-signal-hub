@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  cryptosignal:
+    build: .
+    container_name: cryptosignal-hub
+    restart: unless-stopped
+    ports:
+      - "${CSH_PORT:-8686}:8686"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - CSH_DOCKER=true
+      - CSH_HOST=0.0.0.0
+      - CSH_PORT=8686
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"

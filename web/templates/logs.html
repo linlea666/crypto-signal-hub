@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}运行日志 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="logs-page">
+    <div class="card">
+        <div class="logs-header">
+            <h2 class="page-title">📋 运行日志</h2>
+            <div class="btn-group">
+                <select class="input" id="logLines" style="width:120px;" onchange="loadLogs()">
+                    <option value="100">最近100行</option>
+                    <option value="200" selected>最近200行</option>
+                    <option value="500">最近500行</option>
+                    <option value="1000">最近1000行</option>
+                </select>
+                <label class="checkbox-label" style="font-size:13px;">
+                    <input type="checkbox" id="autoScroll" checked> 自动滚动
+                </label>
+                <label class="checkbox-label" style="font-size:13px;">
+                    <input type="checkbox" id="autoRefresh"> 自动刷新
+                </label>
+                <button class="btn btn-primary btn-sm" onclick="loadLogs()">🔄 刷新</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card log-card">
+        <pre class="log-content" id="logContent">加载中...</pre>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let refreshTimer = null;
+
+async function loadLogs() {
+    const lines = document.getElementById('logLines').value;
+    try {
+        const resp = await fetch(`/api/logs?lines=${lines}`);
+        const data = await resp.json();
+        const el = document.getElementById('logContent');
+        if (data.lines && data.lines.length > 0) {
+            el.innerHTML = data.lines.map(colorLine).join('\n');
+        } else {
+            el.textContent = '暂无日志';
+        }
+        if (document.getElementById('autoScroll').checked) {
+            el.scrollTop = el.scrollHeight;
+        }
+    } catch (e) {
+        document.getElementById('logContent').textContent = '加载失败: ' + e.message;
+    }
+}
+
+function colorLine(line) {
+    const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (line.includes('[ERROR]'))   return `<span class="log-error">${esc}</span>`;
+    if (line.includes('[WARNING]')) return `<span class="log-warn">${esc}</span>`;
+    if (line.includes('✅'))        return `<span class="log-ok">${esc}</span>`;
+    return esc;
+}
+
+document.getElementById('autoRefresh').addEventListener('change', function() {
+    if (this.checked) {
+        refreshTimer = setInterval(loadLogs, 5000);
+    } else {
+        clearInterval(refreshTimer);
+    }
+});
+
+loadLogs();
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CryptoSignal Hub{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="nav-brand">🔮 CryptoSignal Hub</a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">大屏</a>
+            <a href="/history" class="nav-link">历史</a>
+            <a href="/logs" class="nav-link">📋 日志</a>
+            <a href="/config" class="nav-link">⚙️ 配置</a>
+        </div>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+        CryptoSignal Hub v0.1 · 数据来源 OKX / Binance / Deribit / Yahoo Finance · 仅供参考
+    </footer>
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

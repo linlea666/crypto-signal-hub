@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}初始配置 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="setup-wizard">
+    <div class="card" style="max-width:600px;margin:0 auto">
+        <h2 class="card-title">🔮 欢迎使用 CryptoSignal Hub</h2>
+        <p class="subtitle">让我们花 2 分钟完成初始配置</p>
+
+        <div id="steps">
+            <!-- Step 1: 邮箱配置 -->
+            <div class="step active" data-step="1">
+                <h3>📧 Step 1: 邮箱配置</h3>
+                <div class="form-group">
+                    <label>邮箱类型</label>
+                    <div class="btn-group">
+                        <button class="btn btn-outline" onclick="selectMailType('163')">163邮箱</button>
+                        <button class="btn btn-outline" onclick="selectMailType('qq')">QQ邮箱</button>
+                        <button class="btn btn-outline" onclick="selectMailType('gmail')">Gmail</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>SMTP 服务器</label>
+                    <input type="text" id="smtp_host" value="smtp.163.com" class="input">
+                </div>
+                <div class="form-group">
+                    <label>SMTP 端口</label>
+                    <input type="number" id="smtp_port" value="465" class="input">
+                </div>
+                <div class="form-group">
+                    <label>发件邮箱</label>
+                    <input type="email" id="smtp_user" placeholder="your@163.com" class="input">
+                </div>
+                <div class="form-group">
+                    <label>授权码</label>
+                    <input type="password" id="smtp_pass" placeholder="邮箱授权码（非密码）" class="input">
+                </div>
+                <div class="form-group">
+                    <label>收件邮箱</label>
+                    <input type="email" id="mail_to" placeholder="receive@example.com" class="input">
+                </div>
+                <button class="btn btn-secondary" onclick="testEmail()">📧 发送测试邮件</button>
+                <div id="email-result" class="result-msg"></div>
+            </div>
+
+            <!-- Step 2: AI 配置 -->
+            <div class="step" data-step="2">
+                <h3>🤖 Step 2: AI 分析配置</h3>
+                <div class="form-group">
+                    <label>AI 提供商</label>
+                    <select id="ai_provider" class="input" onchange="onAIProviderChange()">
+                        <option value="deepseek">DeepSeek（推荐，便宜）</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="ai_key" placeholder="sk-..." class="input">
+                </div>
+                <div class="form-group">
+                    <label>API Base URL</label>
+                    <input type="text" id="ai_base_url" value="https://api.deepseek.com/v1" class="input">
+                </div>
+                <div class="form-group">
+                    <label>模型</label>
+                    <input type="text" id="ai_model" value="deepseek-chat" class="input">
+                </div>
+                <button class="btn btn-secondary" onclick="testAI()">🧪 测试连接</button>
+                <div id="ai-result" class="result-msg"></div>
+                <p class="hint">也可以跳过此步，不配置 AI 仍可使用评分系统</p>
+            </div>
+
+            <!-- Step 3: 完成 -->
+            <div class="step" data-step="3">
+                <h3>🎉 配置完成！</h3>
+                <p>系统将自动运行：</p>
+                <ul>
+                    <li>每小时采集一次数据并评分</li>
+                    <li>每天 09:00 和 21:00 发送日报邮件</li>
+                    <li>捕捉到强信号时立即推送（不受时间限制）</li>
+                    <li>美股开盘前后加强监控</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="step-nav">
+            <button class="btn btn-outline" id="prevBtn" onclick="prevStep()" style="display:none">← 上一步</button>
+            <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">下一步 →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentStep = 1;
+const totalSteps = 3;
+
+const mailPresets = {
+    '163': {host: 'smtp.163.com', port: 465},
+    'qq': {host: 'smtp.qq.com', port: 465},
+    'gmail': {host: 'smtp.gmail.com', port: 587},
+};
+
+function selectMailType(type) {
+    const preset = mailPresets[type];
+    if (preset) {
+        document.getElementById('smtp_host').value = preset.host;
+        document.getElementById('smtp_port').value = preset.port;
+    }
+}
+
+function onAIProviderChange() {
+    const provider = document.getElementById('ai_provider').value;
+    if (provider === 'deepseek') {
+        document.getElementById('ai_base_url').value = 'https://api.deepseek.com/v1';
+        document.getElementById('ai_model').value = 'deepseek-chat';
+    } else {
+        document.getElementById('ai_base_url').value = 'https://api.openai.com/v1';
+        document.getElementById('ai_model').value = 'gpt-4o-mini';
+    }
+}
+
+function showStep(step) {
+    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+    document.querySelector(`[data-step="${step}"]`).classList.add('active');
+    document.getElementById('prevBtn').style.display = step > 1 ? '' : 'none';
+    document.getElementById('nextBtn').textContent = step === totalSteps ? '进入控制台 →' : '下一步 →';
+}
+
+function nextStep() {
+    if (currentStep < totalSteps) {
+        currentStep++;
+        showStep(currentStep);
+    } else {
+        completeSetup();
+    }
+}
+
+function prevStep() {
+    if (currentStep > 1) {
+        currentStep--;
+        showStep(currentStep);
+    }
+}
+
+async function testEmail() {
+    const result = document.getElementById('email-result');
+    result.textContent = '发送中...';
+    result.className = 'result-msg';
+    try {
+        const resp = await fetch('/api/test/email', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                smtp_host: document.getElementById('smtp_host').value,
+                smtp_port: parseInt(document.getElementById('smtp_port').value),
+                smtp_user: document.getElementById('smtp_user').value,
+                smtp_pass: document.getElementById('smtp_pass').value,
+                from_name: 'CryptoSignal Hub',
+                to: [document.getElementById('mail_to').value],
+                use_ssl: true, enabled: true,
+            })
+        });
+        const data = await resp.json();
+        result.textContent = data.success ? '✅ 测试邮件发送成功！' : '❌ 发送失败: ' + (data.error || '');
+        result.className = 'result-msg ' + (data.success ? 'success' : 'error');
+    } catch (e) {
+        result.textContent = '❌ 请求失败: ' + e.message;
+        result.className = 'result-msg error';
+    }
+}
+
+async function testAI() {
+    const result = document.getElementById('ai-result');
+    result.textContent = '测试中...';
+    try {
+        const resp = await fetch('/api/test/ai', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                provider: document.getElementById('ai_provider').value,
+                api_key: document.getElementById('ai_key').value,
+                base_url: document.getElementById('ai_base_url').value,
+                model: document.getElementById('ai_model').value,
+                enabled: true,
+            })
+        });
+        const data = await resp.json();
+        result.textContent = data.success ? '✅ AI 连接成功！' : '❌ 连接失败';
+        result.className = 'result-msg ' + (data.success ? 'success' : 'error');
+    } catch (e) {
+        result.textContent = '❌ 请求失败: ' + e.message;
+        result.className = 'result-msg error';
+    }
+}
+
+async function completeSetup() {
+    const body = {
+        email: {
+            enabled: true,
+            smtp_host: document.getElementById('smtp_host').value,
+            smtp_port: parseInt(document.getElementById('smtp_port').value),
+            smtp_user: document.getElementById('smtp_user').value,
+            smtp_pass: document.getElementById('smtp_pass').value,
+            from_name: 'CryptoSignal Hub',
+            to: [document.getElementById('mail_to').value],
+        },
+        ai: {
+            enabled: !!document.getElementById('ai_key').value,
+            provider: document.getElementById('ai_provider').value,
+            api_key: document.getElementById('ai_key').value,
+            base_url: document.getElementById('ai_base_url').value,
+            model: document.getElementById('ai_model').value,
+        },
+    };
+    await fetch('/api/setup/complete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+    window.location.href = '/';
+}
+</script>
+{% endblock %}

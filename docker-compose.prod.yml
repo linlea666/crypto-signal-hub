@@ -1,0 +1,32 @@
+version: "3.8"
+
+# 生产环境部署：直接使用 Docker Hub 镜像，无需 clone 代码
+# 用法：
+#   1. 下载此文件和 .env.example
+#   2. cp .env.example .env && 编辑 .env
+#   3. docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  cryptosignal:
+    image: ${CSH_IMAGE:-cryptosignal-hub:latest}
+    container_name: cryptosignal-hub
+    restart: unless-stopped
+    ports:
+      - "${CSH_PORT:-8686}:8686"
+    volumes:
+      - csh-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - CSH_DOCKER=true
+      - CSH_HOST=0.0.0.0
+      - CSH_PORT=8686
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  csh-data:
+    driver: local

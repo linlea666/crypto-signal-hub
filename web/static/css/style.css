@@ -1,0 +1,268 @@
+/* CryptoSignal Hub - 暗色加密风格主题 */
+
+:root {
+    --bg-primary: #0f0f1a;
+    --bg-card: #1a1a2e;
+    --bg-input: #16213e;
+    --bg-hover: #1e2a4a;
+    --text-primary: #e0e0e0;
+    --text-secondary: #94a3b8;
+    --text-muted: #6b7280;
+    --border: #2d2d44;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* ── 导航栏 ── */
+.navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+.nav-brand {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+.nav-links { display: flex; gap: 8px; }
+.nav-link {
+    padding: 6px 14px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+.nav-link:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── 容器与卡片 ── */
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+}
+.card-title {
+    font-size: 15px;
+    color: var(--text-secondary);
+    margin-bottom: 15px;
+    font-weight: 500;
+}
+.page-title { font-size: 20px; margin-bottom: 20px; }
+.grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .grid-2col { grid-template-columns: 1fr; } }
+
+/* ── 概览卡片 ── */
+.overview-card { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.overview-left { flex: 1; }
+.symbol-name { font-size: 14px; color: var(--text-secondary); }
+.price { font-size: 28px; font-weight: 700; }
+.timestamp { font-size: 12px; color: var(--text-muted); }
+.overview-right { text-align: right; }
+.score { font-size: 24px; font-weight: 700; }
+.score.bullish { color: var(--green); }
+.score.bearish { color: var(--red); }
+.score.neutral { color: var(--text-muted); }
+.direction-label { font-size: 14px; margin-left: 6px; }
+.confidence { color: var(--text-secondary); font-size: 14px; }
+.no-data { text-align: center; padding: 30px; color: var(--text-muted); }
+
+/* ── 因子面板 ── */
+.factors-grid { display: flex; flex-direction: column; gap: 10px; }
+.factor-row { display: flex; align-items: center; gap: 12px; }
+.factor-name { width: 100px; font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
+.factor-bar-container {
+    flex: 1; height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden;
+}
+.factor-bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; min-width: 2px; }
+.bar-bullish { background: var(--green); }
+.bar-bearish { background: var(--red); }
+.bar-neutral { background: var(--text-muted); }
+.factor-score { width: 40px; text-align: right; font-weight: 600; font-size: 14px; }
+.factor-score.bullish { color: var(--green); }
+.factor-score.bearish { color: var(--red); }
+.factor-emoji { width: 24px; text-align: center; }
+
+/* ── 关键价位 ── */
+.level-item { padding: 6px 0; font-size: 14px; }
+.level-item.resistance { color: var(--red); }
+.level-item.support { color: var(--green); }
+.level-source { font-size: 11px; color: var(--text-muted); margin-left: 8px; }
+.level-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.current-price-marker {
+    text-align: center; padding: 8px; color: var(--text-muted);
+    font-size: 13px; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border);
+    margin: 8px 0;
+}
+
+/* ── AI 分析 ── */
+.ai-content {
+    font-size: 13px; line-height: 1.8; color: var(--text-secondary);
+    max-height: 300px; overflow-y: auto;
+}
+
+/* ── 数据明细 ── */
+.details-grid { display: flex; flex-direction: column; gap: 8px; }
+.detail-item { display: flex; gap: 12px; font-size: 13px; }
+.detail-name { color: var(--text-muted); width: 80px; flex-shrink: 0; }
+.detail-text { color: var(--text-secondary); }
+
+/* ── 系统状态 ── */
+.status-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.status-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot-ok { background: var(--green); }
+.dot-error { background: var(--red); }
+.status-time { color: var(--text-muted); font-size: 11px; }
+
+/* ── 表格 ── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th {
+    text-align: left; padding: 10px 12px; color: var(--text-muted);
+    border-bottom: 1px solid var(--border); font-weight: 500;
+}
+.data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.data-table tr:hover { background: var(--bg-hover); }
+.clickable-row { cursor: pointer; }
+td.bullish { color: var(--green); }
+td.bearish { color: var(--red); }
+
+/* ── 信号强度徽章 ── */
+.strength-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+}
+.strength-strong { background: rgba(239,68,68,0.2); color: var(--red); }
+.strength-moderate { background: rgba(234,179,8,0.2); color: var(--yellow); }
+.strength-weak { background: rgba(107,114,128,0.2); color: var(--text-muted); }
+
+/* ── 统计卡片 ── */
+.stats-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.stat-item { text-align: center; }
+.stat-value { font-size: 24px; font-weight: 700; color: var(--accent); }
+.stat-label { font-size: 12px; color: var(--text-muted); }
+
+/* ── 表单 ── */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.input {
+    width: 100%; padding: 9px 12px; background: var(--bg-input);
+    border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-primary); font-size: 14px; outline: none;
+}
+.input:focus { border-color: var(--accent); }
+select.input { cursor: pointer; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+
+/* ── 按钮 ── */
+.btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 18px; border-radius: 6px; border: none;
+    font-size: 14px; cursor: pointer; transition: all 0.2s;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--bg-hover); }
+.btn-outline { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+.btn-outline:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-lg { padding: 12px 28px; font-size: 15px; }
+.btn-group { display: flex; gap: 8px; }
+.result-msg { margin-top: 10px; font-size: 13px; }
+.result-msg.success { color: var(--green); }
+.result-msg.error { color: var(--red); }
+
+/* ── 因子配置 ── */
+.factor-config {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.range-group { display: flex; align-items: center; gap: 8px; }
+.range { width: 120px; accent-color: var(--accent); }
+.range-value { font-weight: 600; color: var(--accent); width: 24px; text-align: right; }
+
+/* ── Setup 引导 ── */
+.setup-wizard { max-width: 600px; margin: 40px auto; }
+.subtitle { color: var(--text-secondary); margin-bottom: 20px; }
+.step { display: none; }
+.step.active { display: block; }
+.step h3 { margin-bottom: 16px; }
+.step-nav { display: flex; justify-content: space-between; margin-top: 20px; }
+
+/* ── 健康状态面板 ── */
+.health-overall {
+    font-size: 12px; padding: 2px 10px; border-radius: 4px;
+    margin-left: 10px; font-weight: 600;
+}
+.health-ok { background: rgba(34,197,94,0.15); color: var(--green); }
+.health-degraded { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.health-error { background: rgba(239,68,68,0.15); color: var(--red); }
+.health-unknown { background: rgba(107,114,128,0.15); color: var(--text-muted); }
+
+.health-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+}
+.health-probe {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 8px;
+    background: var(--bg-input); border: 1px solid var(--border);
+    transition: border-color 0.2s;
+}
+.health-probe-ok { border-color: rgba(34,197,94,0.3); }
+.health-probe-degraded { border-color: rgba(234,179,8,0.3); }
+.health-probe-error { border-color: rgba(239,68,68,0.3); }
+.probe-status { font-size: 18px; flex-shrink: 0; }
+.probe-info { flex: 1; min-width: 0; }
+.probe-name { font-size: 13px; font-weight: 500; }
+.probe-message { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.probe-latency { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+.health-footer { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* ── 日志页 ── */
+.logs-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.log-card { padding: 0; }
+.log-content {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', 'Consolas', monospace;
+    font-size: 12px; line-height: 1.6; padding: 16px; margin: 0;
+    max-height: 70vh; overflow-y: auto; overflow-x: auto;
+    color: var(--text-secondary); white-space: pre;
+    background: var(--bg-card);
+}
+.log-error { color: var(--red); }
+.log-warn { color: var(--yellow); }
+.log-ok { color: var(--green); }
+
+/* ── Footer ── */
+.footer {
+    text-align: center; padding: 20px; font-size: 11px;
+    color: var(--text-muted); border-top: 1px solid var(--border);
+    margin-top: 40px;
+}

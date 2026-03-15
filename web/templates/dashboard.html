@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}数据大屏 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- 顶部概览卡片 -->
+    <div class="card overview-card">
+        {% if report %}
+        <div class="overview-left">
+            <div class="symbol-name">{{ report.symbol }}</div>
+            <div class="price">${{ "%.2f"|format(report.snapshot.price.current) }}</div>
+            <div class="timestamp">{{ report.timestamp }}</div>
+        </div>
+        <div class="overview-right">
+            <div class="score {% if report.total_score > 0 %}bullish{% elif report.total_score < 0 %}bearish{% else %}neutral{% endif %}">
+                {{ "%+.0f"|format(report.total_score) }}/{{ "%.0f"|format(report.max_score) }}
+                <span class="direction-label">
+                    {% if report.direction == 'bullish' %}偏多{% elif report.direction == 'bearish' %}偏空{% else %}中性{% endif %}
+                </span>
+            </div>
+            <div class="confidence">信心度 {{ "%.0f"|format(report.confidence) }}%</div>
+            <div class="strength-badge strength-{{ report.signal_strength }}">
+                {{ report.signal_strength }}
+            </div>
+        </div>
+        {% else %}
+        <div class="no-data">
+            <p>暂无数据，点击下方按钮开始首次分析</p>
+        </div>
+        {% endif %}
+        <button class="btn btn-primary" onclick="triggerAnalysis()">🔄 立即分析</button>
+    </div>
+
+    {% if report and report.scores %}
+    <!-- 多维度信号面板 -->
+    <div class="card">
+        <h3 class="card-title">📊 多维度信号面板</h3>
+        <div class="factors-grid">
+            {% for score in report.scores %}
+            <div class="factor-row">
+                <span class="factor-name">{{ score.name }}</span>
+                <div class="factor-bar-container">
+                    <div class="factor-bar {% if score.score > 0 %}bar-bullish{% elif score.score < 0 %}bar-bearish{% else %}bar-neutral{% endif %}"
+                         style="width: {{ (score.score|abs / score.max_score * 100)|int }}%">
+                    </div>
+                </div>
+                <span class="factor-score {% if score.score > 0 %}bullish{% elif score.score < 0 %}bearish{% endif %}">
+                    {{ "%+.0f"|format(score.score) }}
+                </span>
+                <span class="factor-emoji">
+                    {% if score.score > 0 %}📈{% elif score.score < 0 %}📉{% else %}➖{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <!-- 关键价位 -->
+        <div class="card">
+            <h3 class="card-title">📍 关键价位</h3>
+            {% if report.levels.resistances %}
+            <div class="levels-section">
+                <div class="level-label">阻力位</div>
+                {% for lv in report.levels.resistances[:3] %}
+                <div class="level-item resistance">
+                    🔴 {{ "{:,.0f}".format(lv.price) }}
+                    <span class="level-source">{{ lv.source }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="current-price-marker">
+                ── {{ "{:,.2f}".format(report.snapshot.price.current) }} 当前 ──
+            </div>
+            {% if report.levels.supports %}
+            <div class="levels-section">
+                <div class="level-label">支撑位</div>
+                {% for lv in report.levels.supports[:3] %}
+                <div class="level-item support">
+                    🟢 {{ "{:,.0f}".format(lv.price) }}
+                    <span class="level-source">{{ lv.source }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- AI 分析 -->
+        <div class="card">
+            <h3 class="card-title">🤖 AI 分析</h3>
+            <div class="ai-content">
+                {{ report.ai_analysis|default('AI 分析尚未生成', true)|replace('\n', '<br>')|safe }}
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据明细 -->
+    <div class="card">
+        <h3 class="card-title">📋 评分依据明细</h3>
+        <div class="details-grid">
+            {% for score in report.scores %}
+            <div class="detail-item">
+                <span class="detail-name">{{ score.name }}</span>
+                <span class="detail-text">{{ score.details }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 服务健康状态 -->
+    <div class="card">
+        <h3 class="card-title">
+            🏥 服务健康状态
+            {% if health %}
+            <span class="health-overall health-{{ health.overall.value }}">
+                {{ health.ok_count }}/{{ health.total_count }} 正常
+            </span>
+            {% endif %}
+            <button class="btn btn-outline btn-sm" onclick="refreshHealth()" id="refreshHealthBtn" style="float:right;">🔄 刷新</button>
+        </h3>
+        <div class="health-grid" id="healthGrid">
+            {% if health and health.probes %}
+                {% for p in health.probes %}
+                <div class="health-probe health-probe-{{ p.status.value }}">
+                    <div class="probe-status">
+                        {% if p.status.value == 'ok' %}🟢{% elif p.status.value == 'degraded' %}🟡{% elif p.status.value == 'error' %}🔴{% else %}⚪{% endif %}
+                    </div>
+                    <div class="probe-info">
+                        <div class="probe-name">{{ p.name }}</div>
+                        <div class="probe-message">{{ p.message }}</div>
+                    </div>
+                    {% if p.latency_ms > 0 %}
+                    <div class="probe-latency">{{ "%.0f"|format(p.latency_ms) }}ms</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-data" style="padding:12px;">健康检查尚未执行，点击刷新</div>
+            {% endif %}
+        </div>
+        {% if health %}
+        <div class="health-footer">上次检查: {{ health.checked_at[:19] }}</div>
+        {% endif %}
+    </div>
+
+    <!-- 系统状态 -->
+    <div class="card">
+        <h3 class="card-title">🖥️ 运行状态</h3>
+        <div class="status-grid">
+            {% for name, status in collector_status.items() %}
+            <div class="status-item">
+                <span class="status-dot {% if status.ok %}dot-ok{% else %}dot-error{% endif %}"></span>
+                {{ name }}
+                <span class="status-time">{{ status.last_run or '未运行' }}</span>
+            </div>
+            {% endfor %}
+            <div class="status-item">
+                <span class="status-dot dot-ok"></span>
+                今日邮件: {{ emails_today }}/{{ config.schedule.max_daily_emails }}
+            </div>
+            <div class="status-item">
+                <a href="/logs" class="nav-link" style="padding:0;">📋 查看日志</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 历史信号简表 -->
+    {% if reports_list %}
+    <div class="card">
+        <h3 class="card-title">📈 近期信号</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>方向</th>
+                    <th>评分</th>
+                    <th>信心度</th>
+                    <th>强度</th>
+                    <th>已推送</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in reports_list[:10] %}
+                <tr>
+                    <td>{{ r.timestamp[:16] }}</td>
+                    <td class="{{ r.direction }}">
+                        {% if r.direction == 'bullish' %}📈多{% elif r.direction == 'bearish' %}📉空{% else %}➖{% endif %}
+                    </td>
+                    <td>{{ "%+.0f"|format(r.total_score) }}/{{ "%.0f"|format(r.max_score) }}</td>
+                    <td>{{ "%.0f"|format(r.confidence) }}%</td>
+                    <td><span class="strength-badge strength-{{ r.signal_strength }}">{{ r.signal_strength }}</span></td>
+                    <td>{{ '✅' if r.email_sent else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

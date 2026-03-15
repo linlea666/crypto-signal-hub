@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}系统配置 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="config-page">
+    <h2 class="page-title">⚙️ 系统配置</h2>
+
+    <form id="configForm" onsubmit="saveConfig(event)">
+        <!-- 基础设置 -->
+        <div class="card">
+            <h3 class="card-title">🔧 基础设置</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>监控币种</label>
+                    <input type="text" name="general.symbols" value="{{ config.general.symbols|join(', ') }}" class="input" placeholder="BTC/USDT, ETH/USDT">
+                </div>
+                <div class="form-group">
+                    <label>分析周期（分钟）</label>
+                    <input type="number" name="general.analysis_interval_minutes" value="{{ config.general.analysis_interval_minutes }}" class="input" min="5" max="1440">
+                </div>
+            </div>
+        </div>
+
+        <!-- 评分权重 -->
+        <div class="card">
+            <h3 class="card-title">📊 评分因子权重</h3>
+            {% set factors = [
+                ('technical', '技术面趋势', config.scoring.technical),
+                ('funding_rate', '资金费率', config.scoring.funding_rate),
+                ('open_interest', '持仓量(OI)', config.scoring.open_interest),
+                ('long_short_ratio', '多空比', config.scoring.long_short_ratio),
+                ('options', '期权数据', config.scoring.options),
+                ('macro', '宏观环境', config.scoring.macro),
+                ('sentiment', '情绪指标', config.scoring.sentiment),
+            ] %}
+            {% for key, label, factor in factors %}
+            <div class="factor-config">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="scoring.{{ key }}.enabled" {{ 'checked' if factor.enabled }}>
+                    {{ label }}
+                </label>
+                <div class="range-group">
+                    <input type="range" name="scoring.{{ key }}.weight" value="{{ factor.weight }}" min="5" max="30" class="range" oninput="this.nextElementSibling.textContent=this.value">
+                    <span class="range-value">{{ factor.weight|int }}</span> 分
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- 邮件推送 -->
+        <div class="card">
+            <h3 class="card-title">📧 邮件推送</h3>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="email.enabled" {{ 'checked' if config.email.enabled }}>
+                    启用邮件推送
+                </label>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>SMTP 服务器</label>
+                    <input type="text" name="email.smtp_host" value="{{ config.email.smtp_host }}" class="input">
+                </div>
+                <div class="form-group">
+                    <label>端口</label>
+                    <input type="number" name="email.smtp_port" value="{{ config.email.smtp_port }}" class="input">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>发件邮箱</label>
+                    <input type="text" name="email.smtp_user" value="{{ config.email.smtp_user }}" class="input">
+                </div>
+                <div class="form-group">
+                    <label>授权码</label>
+                    <input type="password" name="email.smtp_pass" value="{{ config.email.smtp_pass }}" class="input">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>收件邮箱（多个用逗号分隔）</label>
+                <input type="text" name="email.to" value="{{ config.email.to|join(', ') }}" class="input">
+            </div>
+        </div>
+
+        <!-- 调度规则 -->
+        <div class="card">
+            <h3 class="card-title">🕐 推送调度</h3>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="schedule.hourly_report_email" {{ 'checked' if config.schedule.hourly_report_email }}>
+                    每小时发送分析邮件（默认关闭）
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="schedule.strong_signal_alert" {{ 'checked' if config.schedule.strong_signal_alert }} disabled>
+                    强信号实时推送（始终开启，不受时间限制）
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="schedule.us_market_alert" {{ 'checked' if config.schedule.us_market_alert }}>
+                    美股开盘前后加强监控
+                </label>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>日报时间</label>
+                    <input type="text" name="schedule.daily_report_times" value="{{ config.schedule.daily_report_times|join(', ') }}" class="input" placeholder="09:00, 21:00">
+                </div>
+                <div class="form-group">
+                    <label>每日最大邮件数</label>
+                    <input type="number" name="schedule.max_daily_emails" value="{{ config.schedule.max_daily_emails }}" class="input" min="1" max="50">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>静默时段起始（不影响强信号）</label>
+                    <input type="text" name="schedule.quiet_hours_start" value="{{ config.schedule.quiet_hours_start }}" class="input" placeholder="00:00">
+                </div>
+                <div class="form-group">
+                    <label>静默时段结束</label>
+                    <input type="text" name="schedule.quiet_hours_end" value="{{ config.schedule.quiet_hours_end }}" class="input" placeholder="07:00">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>重复信号冷却（小时）</label>
+                <input type="number" name="schedule.duplicate_signal_cooldown_hours" value="{{ config.schedule.duplicate_signal_cooldown_hours }}" class="input" min="1" max="24">
+            </div>
+        </div>
+
+        <!-- AI 配置 -->
+        <div class="card">
+            <h3 class="card-title">🤖 AI 分析</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>AI 提供商</label>
+                    <select name="ai.provider" class="input">
+                        <option value="deepseek" {{ 'selected' if config.ai.provider == 'deepseek' }}>DeepSeek</option>
+                        <option value="openai" {{ 'selected' if config.ai.provider == 'openai' }}>OpenAI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>模型</label>
+                    <input type="text" name="ai.model" value="{{ config.ai.model }}" class="input">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" name="ai.api_key" value="{{ config.ai.api_key }}" class="input">
+            </div>
+            <div class="form-group">
+                <label>Base URL</label>
+                <input type="text" name="ai.base_url" value="{{ config.ai.base_url }}" class="input">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg">💾 保存配置</button>
+        <div id="save-result" class="result-msg"></div>
+    </form>
+</div>
+
+<script>
+async function saveConfig(e) {
+    e.preventDefault();
+    const result = document.getElementById('save-result');
+    result.textContent = '保存中...';
+
+    const form = document.getElementById('configForm');
+    const formData = new FormData(form);
+    const config = {};
+
+    for (const [key, value] of formData.entries()) {
+        const parts = key.split('.');
+        let obj = config;
+        for (let i = 0; i < parts.length - 1; i++) {
+            obj[parts[i]] = obj[parts[i]] || {};
+            obj = obj[parts[i]];
+        }
+        const lastKey = parts[parts.length - 1];
+        if (value === 'on') obj[lastKey] = true;
+        else if (!isNaN(value) && value !== '') obj[lastKey] = Number(value);
+        else if (lastKey === 'symbols' || lastKey === 'to' || lastKey === 'daily_report_times')
+            obj[lastKey] = value.split(',').map(s => s.trim()).filter(Boolean);
+        else obj[lastKey] = value;
+    }
+
+    // 处理未勾选的 checkbox
+    document.querySelectorAll('input[type="checkbox"]:not(:checked):not(:disabled)').forEach(cb => {
+        const parts = cb.name.split('.');
+        let obj = config;
+        for (let i = 0; i < parts.length - 1; i++) {
+            obj[parts[i]] = obj[parts[i]] || {};
+            obj = obj[parts[i]];
+        }
+        obj[parts[parts.length - 1]] = false;
+    });
+
+    try {
+        const resp = await fetch('/api/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config),
+        });
+        const data = await resp.json();
+        result.textContent = data.success ? '✅ 配置已保存' : '❌ ' + (data.error || '保存失败');
+        result.className = 'result-msg ' + (data.success ? 'success' : 'error');
+    } catch (e) {
+        result.textContent = '❌ ' + e.message;
+        result.className = 'result-msg error';
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,14 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.env
+data/
+*.log
+.vscode
+.idea
+.DS_Store
+README.md
+deploy.sh
+docker-compose*.yml

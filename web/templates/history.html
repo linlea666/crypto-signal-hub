@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}历史信号 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="history-page">
+    <h2 class="page-title">📈 历史信号追踪</h2>
+
+    {% if stats %}
+    <div class="card">
+        <h3 class="card-title">📊 近 {{ stats.period_days }} 天统计</h3>
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-value">{{ stats.total }}</div>
+                <div class="stat-label">总信号数</div>
+            </div>
+            {% for item in stats.breakdown %}
+            <div class="stat-item">
+                <div class="stat-value">{{ item.cnt }}</div>
+                <div class="stat-label">{{ item.signal_strength }} / {{ item.direction }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>交易对</th>
+                    <th>方向</th>
+                    <th>评分</th>
+                    <th>信心度</th>
+                    <th>强度</th>
+                    <th>类型</th>
+                    <th>已推送</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in reports %}
+                <tr class="clickable-row" onclick="window.location='/api/report/{{ r.id }}'">
+                    <td>{{ r.timestamp[:16] }}</td>
+                    <td>{{ r.symbol }}</td>
+                    <td class="{{ r.direction }}">
+                        {% if r.direction == 'bullish' %}📈 多
+                        {% elif r.direction == 'bearish' %}📉 空
+                        {% else %}➖ 中{% endif %}
+                    </td>
+                    <td>{{ "%+.0f"|format(r.total_score) }}/{{ "%.0f"|format(r.max_score) }}</td>
+                    <td>{{ "%.0f"|format(r.confidence) }}%</td>
+                    <td><span class="strength-badge strength-{{ r.signal_strength }}">{{ r.signal_strength }}</span></td>
+                    <td>{{ r.alert_type }}</td>
+                    <td>{{ '✅' if r.email_sent else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
