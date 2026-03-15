@@ -7,7 +7,7 @@
 - 加密恐惧贪婪指数
 - BTC ETF 资金流（预留接口）
 
-使用 yfinance 获取美股数据（免费，无需 Key）。
+使用 Yahoo Finance v8 chart API（httpx 直连，无需第三方库）。
 使用 alternative.me API 获取恐惧贪婪指数（免费，无需 Key）。
 """
 
@@ -18,20 +18,21 @@ import logging
 import time
 
 import httpx
-import yfinance as yf
 
 from core.interfaces import DataCollector
 from core.models import MacroData
 
 logger = logging.getLogger(__name__)
 
-# yfinance ticker 映射
+# Yahoo Finance v8 chart API（直连 httpx，无需 yfinance 库）
 _TICKER_MAP = {
-    "nasdaq": "^IXIC",
-    "sp500": "^GSPC",
+    "nasdaq": "%5EIXIC",
+    "sp500": "%5EGSPC",
     "dxy": "DX-Y.NYB",
-    "vix": "^VIX",
+    "vix": "%5EVIX",
 }
+
+_YAHOO_CHART_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?range=2d&interval=1d"
 
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 
@@ -91,29 +92,47 @@ class MacroCollector(DataCollector):
         return results
 
     async def _fetch_yahoo_quote(self, key: str, retries: int = 2) -> dict:
-        """通过 yfinance 获取行情快照，带重试"""
+        """通过 Yahoo v8 chart API 直连获取行情（比 yfinance 库更稳定）"""
         ticker_symbol = _TICKER_MAP.get(key)
         if not ticker_symbol:
             return {}
 
+        url = _YAHOO_CHART_URL.format(symbol=ticker_symbol)
+        headers = {"User-Agent": "Mozilla/5.0 CryptoSignalHub/1.0"}
+
         for attempt in range(retries + 1):
             try:
-                ticker = yf.Ticker(ticker_symbol)
-                info = ticker.fast_info
-                price = float(info.last_price) if hasattr(info, "last_price") else None
-                prev = float(info.previous_close) if hasattr(info, "previous_close") else None
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 429 and attempt < retries:
+                        wait = 2 ** (attempt + 1)
+                        logger.info("Yahoo %s 限流，%d 秒后重试...", key, wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                result = data.get("chart", {}).get("result", [])
+                if not result:
+                    return {}
+
+                meta = result[0].get("meta", {})
+                price = meta.get("regularMarketPrice")
+                prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+
                 change_pct = 0.0
                 if price and prev and prev > 0:
                     change_pct = round(((price - prev) / prev) * 100, 2)
-                return {"price": round(price, 2) if price else None, "change_pct": change_pct}
+
+                return {
+                    "price": round(price, 2) if price else None,
+                    "change_pct": change_pct,
+                }
             except Exception as e:
-                msg = str(e)
-                if "429" in msg and attempt < retries:
-                    wait = 2 ** (attempt + 1)
-                    logger.info("Yahoo %s 被限流，%d 秒后重试...", key, wait)
-                    await asyncio.sleep(wait)
+                if attempt < retries:
+                    await asyncio.sleep(1)
                     continue
-                logger.warning("yfinance 获取 %s 失败: %s", key, e)
+                logger.warning("Yahoo %s 获取失败: %s", key, e)
                 return {}
         return {}
 

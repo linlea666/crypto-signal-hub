@@ -260,6 +260,10 @@
         btn.textContent = '⏳ 分析中...';
         btn.disabled = true;
 
+        // 空状态进度条
+        var progress = document.getElementById('analyze-progress');
+        if (progress) progress.style.display = 'block';
+
         var body = {};
         if (symbol) body.symbol = symbol;
 
@@ -282,6 +286,7 @@
             .finally(function () {
                 btn.textContent = originalText;
                 btn.disabled = false;
+                if (progress) progress.style.display = 'none';
             });
     };
 

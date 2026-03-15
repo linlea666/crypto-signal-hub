@@ -1077,6 +1077,113 @@ select.input { cursor: pointer; }
 .result-msg.success { color: var(--bullish); }
 .result-msg.error { color: var(--bearish); }
 
+/* ── Symbol Tags ────────────────────────────────────────── */
+.symbol-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 32px;
+}
+
+.symbol-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px 4px 12px;
+    background: var(--primary-glow);
+    border: 1px solid var(--primary-dim);
+    border-radius: 20px;
+    color: var(--primary);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+}
+
+.symbol-tag-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 2px;
+    margin-left: 2px;
+    border-radius: 50%;
+    transition: color .15s, background .15s;
+}
+.symbol-tag-remove:hover {
+    color: var(--bearish);
+    background: var(--bearish-bg);
+}
+
+.btn-preset {
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+}
+.btn-preset:hover {
+    border-color: var(--primary-dim);
+    color: var(--primary);
+    background: var(--primary-glow);
+}
+
+/* ── Empty State ─────────────────────────────────────────── */
+.empty-state-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap);
+}
+
+.progress-bar {
+    height: 3px;
+    background: var(--bg-input);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 300px;
+    margin: 0 auto;
+}
+.progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    border-radius: 2px;
+    animation: progressPulse 2s ease-in-out infinite;
+}
+@keyframes progressPulse {
+    0% { width: 5%; }
+    50% { width: 80%; }
+    100% { width: 5%; }
+}
+
+.guide-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.guide-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+.guide-num {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--primary-dim);
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 /* ── 25. Log Viewer ────────────────────────────────────────── */
 
 .logs-header {

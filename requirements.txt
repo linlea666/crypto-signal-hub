@@ -1,8 +1,6 @@
 # CryptoSignal Hub - Dependencies
 # 交易所数据统一接口
 ccxt>=4.4.0
-# 美股/宏观数据
-yfinance>=0.2.40
 # 数据处理
 pandas>=2.2.0
 # 技术指标（纯 Python，无需编译 TA-Lib）

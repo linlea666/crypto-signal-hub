@@ -26,6 +26,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config.schema import AppConfig
 from core.constants import AlertType, SignalStrength
+from core.models import SignalReport
 
 if TYPE_CHECKING:
     from analyzer.reporter import AIReporter

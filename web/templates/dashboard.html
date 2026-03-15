@@ -304,14 +304,82 @@
 </div>
 
 {% else %}
-<!-- No data state -->
-<div style="text-align:center;padding:80px 20px">
-    <div style="font-size:48px;margin-bottom:16px;opacity:0.3">◈</div>
-    <div style="font-size:18px;color:var(--text-primary);margin-bottom:8px">暂无数据</div>
-    <div class="price-meta" style="margin-bottom:24px">点击下方按钮开始首次分析</div>
-    <button class="btn-primary" onclick="triggerAnalysis('{{ active_symbol }}')" style="font-size:15px;padding:12px 32px">
-        分析 {{ active_symbol }}
-    </button>
+<!-- Empty state: 显示引导 + 健康状态 + 分析按钮 -->
+<div class="empty-state-grid">
+    <!-- 引导面板 -->
+    <div class="card" style="grid-column:1/-1;text-align:center;padding:40px 20px">
+        <div style="font-size:48px;margin-bottom:12px;opacity:0.2">◈</div>
+        <div style="font-size:18px;color:var(--text-primary);margin-bottom:8px">暂无分析数据</div>
+        <div class="price-meta" style="margin-bottom:20px;max-width:480px;margin-left:auto;margin-right:auto">
+            系统已就绪，点击下方按钮开始首次分析。分析过程约需 20-40 秒，将自动采集 7 个维度的市场数据并生成评分报告。
+        </div>
+        <button class="btn-primary" id="empty-analyze-btn" onclick="triggerAnalysis('{{ active_symbol }}')" style="font-size:15px;padding:12px 32px">
+            分析 {{ active_symbol }}
+        </button>
+        <div id="analyze-progress" style="display:none;margin-top:16px">
+            <div class="price-meta">正在采集数据并分析中，请稍候...</div>
+            <div class="progress-bar" style="margin-top:10px">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 服务健康状态 -->
+    <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>服务状态
+                {% if health %}
+                <span class="signal-badge {% if health.ok_count == health.total_count %}moderate{% else %}weak{% endif %}" style="font-size:10px;padding:2px 8px;margin-left:8px">
+                    {{ health.ok_count }}/{{ health.total_count }}
+                </span>
+                {% endif %}
+            </span>
+            <button class="btn-outline" onclick="refreshHealth()" style="font-size:11px;padding:4px 12px">刷新</button>
+        </div>
+        <div class="health-bar" id="health-bar">
+            {% if health %}
+            {% for p in health.probes %}
+            <div class="health-probe">
+                <span class="health-dot {{ p.status.value if p.status is not string else p.status }}"></span>
+                <span class="health-probe-name">{{ p.name }}</span>
+                {% if p.latency_ms %}
+                <span class="mono price-meta">{{ "%.0f"|format(p.latency_ms) }}ms</span>
+                {% else %}
+                <span class="price-meta">{{ p.message[:20] }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 快速配置提示 -->
+    <div class="card">
+        <div class="card-title">快速指南</div>
+        <div class="guide-list">
+            <div class="guide-item">
+                <span class="guide-num">1</span>
+                <div>
+                    <div style="color:var(--text-primary);font-size:13px">配置 AI 和邮箱</div>
+                    <div class="price-meta">在 <a href="/config" style="color:var(--primary)">配置页面</a> 设置 API Key 和邮箱</div>
+                </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">2</span>
+                <div>
+                    <div style="color:var(--text-primary);font-size:13px">添加监控币种</div>
+                    <div class="price-meta">支持 BTC、ETH、SOL 等多币种同时监控</div>
+                </div>
+            </div>
+            <div class="guide-item">
+                <span class="guide-num">3</span>
+                <div>
+                    <div style="color:var(--text-primary);font-size:13px">开始分析</div>
+                    <div class="price-meta">点击上方按钮或等待系统自动周期分析</div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

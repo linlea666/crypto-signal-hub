@@ -9,15 +9,31 @@
         <!-- 基础设置 -->
         <div class="card">
             <h3 class="card-title">🔧 基础设置</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>监控币种</label>
-                    <input type="text" name="general.symbols" value="{{ config.general.symbols|join(', ') }}" class="input" placeholder="BTC/USDT, ETH/USDT">
+
+            <div class="form-group">
+                <label>监控币种</label>
+                <input type="hidden" name="general.symbols" id="symbols-hidden" value="{{ config.general.symbols|join(', ') }}">
+                <div class="symbol-tags" id="symbol-tags">
+                    {% for sym in config.general.symbols %}
+                    <span class="symbol-tag">{{ sym }}<button type="button" class="symbol-tag-remove" onclick="removeSymbol(this)">×</button></span>
+                    {% endfor %}
                 </div>
-                <div class="form-group">
-                    <label>分析周期（分钟）</label>
-                    <input type="number" name="general.analysis_interval_minutes" value="{{ config.general.analysis_interval_minutes }}" class="input" min="5" max="1440">
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+                    <input type="text" id="symbol-input" class="input" placeholder="输入币种如 SOL/USDT 后回车" style="flex:1;min-width:180px"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();addSymbolFromInput()}">
+                    <button type="button" class="btn-outline" onclick="addSymbolFromInput()" style="white-space:nowrap">+ 添加</button>
                 </div>
+                <div class="symbol-presets" style="margin-top:8px">
+                    <span class="price-meta" style="margin-right:6px">快速添加:</span>
+                    {% for preset in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'] %}
+                    <button type="button" class="btn-preset" onclick="addSymbol('{{ preset }}')">{{ preset.split('/')[0] }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top:16px">
+                <label>分析周期（分钟）</label>
+                <input type="number" name="general.analysis_interval_minutes" value="{{ config.general.analysis_interval_minutes }}" class="input" min="5" max="1440" style="max-width:200px">
             </div>
         </div>
 
@@ -161,6 +177,43 @@
 </div>
 
 <script>
+/* ── 币种标签管理 ── */
+function syncSymbolsHidden() {
+    const tags = document.querySelectorAll('#symbol-tags .symbol-tag');
+    const symbols = Array.from(tags).map(t => t.textContent.replace('×', '').trim());
+    document.getElementById('symbols-hidden').value = symbols.join(', ');
+}
+
+function addSymbol(sym) {
+    sym = sym.trim().toUpperCase();
+    if (!sym) return;
+    // 自动补全 /USDT
+    if (!sym.includes('/')) sym += '/USDT';
+    // 去重
+    const existing = document.querySelectorAll('#symbol-tags .symbol-tag');
+    for (const tag of existing) {
+        if (tag.textContent.replace('×', '').trim() === sym) return;
+    }
+    const span = document.createElement('span');
+    span.className = 'symbol-tag';
+    span.innerHTML = sym + '<button type="button" class="symbol-tag-remove" onclick="removeSymbol(this)">×</button>';
+    document.getElementById('symbol-tags').appendChild(span);
+    syncSymbolsHidden();
+}
+
+function addSymbolFromInput() {
+    const input = document.getElementById('symbol-input');
+    addSymbol(input.value);
+    input.value = '';
+    input.focus();
+}
+
+function removeSymbol(btn) {
+    btn.parentElement.remove();
+    syncSymbolsHidden();
+}
+
+/* ── 配置保存 ── */
 async function saveConfig(e) {
     e.preventDefault();
     const result = document.getElementById('save-result');
