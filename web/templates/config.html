@@ -171,12 +171,225 @@
             </div>
         </div>
 
+        <!-- ═══ 执行层配置（重构后）═══ -->
+        <div class="card exec-card">
+            <h3 class="card-title">⚡ 执行层 (自动交易)</h3>
+
+            <!-- 控制面板 -->
+            <div class="exec-control-panel">
+                <div class="exec-control-left">
+                    <label class="exec-enable-toggle">
+                        <input type="checkbox" name="executor.enabled" {{ 'checked' if config.executor.enabled }}>
+                        <span class="exec-toggle-text">启用执行层</span>
+                    </label>
+                    <span class="exec-mode-indicator mode-{{ config.executor.mode }}">
+                        {{ '🟢 模拟盘' if config.executor.mode == 'demo' else '🔴 实盘' }}
+                    </span>
+                </div>
+                <div class="exec-control-right">
+                    <span id="exec-conn-status" class="exec-conn-badge conn-unknown">未连接</span>
+                    <button type="button" class="test-btn" onclick="testExecConnection()">🔗 测试连接</button>
+                </div>
+            </div>
+
+            {% if config.executor.mode == 'live' and config.executor.enabled %}
+            <div class="executor-live-warning" style="margin:10px 0">
+                ⚠️ 实盘模式 — 所有交易将使用真实资金，请谨慎操作
+            </div>
+            {% endif %}
+
+            <!-- 策略预设 -->
+            <div class="exec-section">
+                <div class="exec-section-title">策略预设</div>
+                <div class="exec-preset-row">
+                    <select id="preset-select" name="executor.preset" class="input" style="max-width:200px" onchange="applyPreset(this.value)">
+                        <option value="conservative" {{ 'selected' if config.executor.preset == 'conservative' }}>🛡️ 保守稳健</option>
+                        <option value="balanced" {{ 'selected' if config.executor.preset == 'balanced' }}>⚖️ 均衡标准（默认）</option>
+                        <option value="aggressive" {{ 'selected' if config.executor.preset == 'aggressive' }}>🔥 激进进攻</option>
+                        <option value="custom" {{ 'selected' if config.executor.preset == 'custom' }}>✏️ 自定义</option>
+                    </select>
+                    <span id="preset-desc" class="exec-preset-desc"></span>
+                </div>
+            </div>
+
+            <!-- API 配置 -->
+            <div class="exec-section">
+                <div class="exec-section-title">API 配置</div>
+                <div class="exec-param-grid cols-2">
+                    <div class="form-group">
+                        <label>交易模式</label>
+                        <select name="executor.mode" class="input">
+                            <option value="demo" {{ 'selected' if config.executor.mode == 'demo' }}>模拟盘 (Demo)</option>
+                            <option value="live" {{ 'selected' if config.executor.mode == 'live' }}>实盘 (Live) ⚠️</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>交易所</label>
+                        <select name="executor.exchange" class="input">
+                            <option value="okx" {{ 'selected' if config.executor.exchange == 'okx' }}>OKX</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="exec-param-grid cols-3">
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" name="executor.api_key" value="{{ config.executor.api_key }}" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label>API Secret</label>
+                        <input type="password" name="executor.api_secret" value="{{ config.executor.api_secret }}" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label>Passphrase</label>
+                        <input type="password" name="executor.passphrase" value="{{ config.executor.passphrase }}" class="input">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 交易参数网格 -->
+            <div class="exec-section">
+                <div class="exec-section-title">交易参数</div>
+                <div class="exec-param-grid cols-4">
+                    <div class="form-group">
+                        <label>默认杠杆</label>
+                        <input type="number" id="p-leverage" name="executor.default_leverage" value="{{ config.executor.default_leverage }}" class="input" min="1" max="20">
+                    </div>
+                    <div class="form-group">
+                        <label>最大持仓数</label>
+                        <input type="number" name="executor.max_positions" value="{{ config.executor.max_positions }}" class="input" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label>仓位上限 (%)</label>
+                        <input type="number" name="executor.max_position_pct" value="{{ config.executor.max_position_pct }}" class="input" min="1" max="50" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label>盈亏比门槛</label>
+                        <input type="number" id="p-min-rr" name="executor.min_risk_reward" value="{{ config.executor.min_risk_reward }}" class="input" min="1" max="5" step="0.1">
+                    </div>
+                </div>
+                <div class="exec-param-grid cols-4">
+                    <div class="form-group">
+                        <label>信心度门槛</label>
+                        <input type="number" id="p-min-conf" name="executor.min_confidence" value="{{ config.executor.min_confidence }}" class="input" min="0" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>信号强度</label>
+                        <select name="executor.min_signal_strength" class="input">
+                            <option value="strong" {{ 'selected' if config.executor.min_signal_strength == 'strong' }}>Strong</option>
+                            <option value="moderate" {{ 'selected' if config.executor.min_signal_strength == 'moderate' }}>Moderate+</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>日亏熔断 (%)</label>
+                        <input type="number" name="executor.daily_loss_limit_pct" value="{{ config.executor.daily_loss_limit_pct }}" class="input" min="1" max="20" step="0.5">
+                    </div>
+                    <div class="form-group"></div>
+                </div>
+            </div>
+
+            <!-- 资金分配 -->
+            <div class="exec-section">
+                <div class="exec-section-title">分级资金分配</div>
+                <div class="exec-param-grid cols-3">
+                    <div class="form-group">
+                        <label>🟡 LIGHT 档 (%)</label>
+                        <input type="number" id="p-light" name="executor.light_position_pct" value="{{ config.executor.light_position_pct }}" class="input" min="1" max="20" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label>🟠 NORMAL 档 (%)</label>
+                        <input type="number" id="p-normal" name="executor.normal_position_pct" value="{{ config.executor.normal_position_pct }}" class="input" min="2" max="30" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label>🔴 HEAVY 档 (%)</label>
+                        <input type="number" id="p-heavy" name="executor.heavy_position_pct" value="{{ config.executor.heavy_position_pct }}" class="input" min="3" max="40" step="0.5">
+                    </div>
+                </div>
+                <div class="exec-sizing-tip">
+                    根据信号的 position_size 档位分配基础仓位比例，叠加信心度/盈亏比/市场状态/连亏因子动态调节
+                </div>
+            </div>
+
+            <!-- 功能开关 -->
+            <div class="exec-section">
+                <div class="exec-section-title">功能开关</div>
+                <div class="exec-toggle-grid">
+                    <label class="exec-toggle-item">
+                        <input type="checkbox" name="executor.auto_execute" {{ 'checked' if config.executor.auto_execute }}>
+                        <span>自动执行</span>
+                    </label>
+                    <label class="exec-toggle-item">
+                        <input type="checkbox" name="executor.enable_trailing_stop" {{ 'checked' if config.executor.enable_trailing_stop }}>
+                        <span>移动止损</span>
+                    </label>
+                    <label class="exec-toggle-item">
+                        <input type="checkbox" name="executor.enable_dynamic_sizing" {{ 'checked' if config.executor.enable_dynamic_sizing }}>
+                        <span>动态仓位调节</span>
+                    </label>
+                    <label class="exec-toggle-item">
+                        <input type="checkbox" name="executor.consecutive_loss_shrink" {{ 'checked' if config.executor.consecutive_loss_shrink }}>
+                        <span>连亏缩仓</span>
+                    </label>
+                    <label class="exec-toggle-item">
+                        <input type="checkbox" name="executor.enable_signal_export" {{ 'checked' if config.executor.enable_signal_export }}>
+                        <span>信号自动存档</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-lg">💾 保存配置</button>
         <div id="save-result" class="result-msg"></div>
     </form>
 </div>
 
 <script>
+/* ── 策略预设 ── */
+const PRESETS = {
+    conservative: {
+        desc: '小资金积累，严格风控，低杠杆',
+        min_risk_reward: 2.0, min_confidence: 75, default_leverage: 2,
+        light_position_pct: 3, normal_position_pct: 5, heavy_position_pct: 8,
+    },
+    balanced: {
+        desc: '日常运行推荐，均衡风险与收益',
+        min_risk_reward: 1.5, min_confidence: 65, default_leverage: 3,
+        light_position_pct: 4, normal_position_pct: 7, heavy_position_pct: 11,
+    },
+    aggressive: {
+        desc: '行情活跃期使用，高杠杆高仓位',
+        min_risk_reward: 1.2, min_confidence: 55, default_leverage: 5,
+        light_position_pct: 6, normal_position_pct: 10, heavy_position_pct: 15,
+    },
+};
+
+function applyPreset(name) {
+    const p = PRESETS[name];
+    if (!p) {
+        document.getElementById('preset-desc').textContent = '自定义模式：手动调整下方参数';
+        return;
+    }
+    document.getElementById('preset-desc').textContent = p.desc;
+    document.getElementById('p-min-rr').value = p.min_risk_reward;
+    document.getElementById('p-min-conf').value = p.min_confidence;
+    document.getElementById('p-leverage').value = p.default_leverage;
+    document.getElementById('p-light').value = p.light_position_pct;
+    document.getElementById('p-normal').value = p.normal_position_pct;
+    document.getElementById('p-heavy').value = p.heavy_position_pct;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const sel = document.getElementById('preset-select');
+    const p = PRESETS[sel.value];
+    document.getElementById('preset-desc').textContent = p ? p.desc : '自定义模式：手动调整下方参数';
+
+    document.querySelectorAll('#p-min-rr,#p-min-conf,#p-leverage,#p-light,#p-normal,#p-heavy').forEach(el => {
+        el.addEventListener('input', () => {
+            sel.value = 'custom';
+            document.getElementById('preset-desc').textContent = '自定义模式：手动调整下方参数';
+        });
+    });
+});
+
 /* ── 币种标签管理 ── */
 function syncSymbolsHidden() {
     const tags = document.querySelectorAll('#symbol-tags .symbol-tag');
@@ -187,9 +400,7 @@ function syncSymbolsHidden() {
 function addSymbol(sym) {
     sym = sym.trim().toUpperCase();
     if (!sym) return;
-    // 自动补全 /USDT
     if (!sym.includes('/')) sym += '/USDT';
-    // 去重
     const existing = document.querySelectorAll('#symbol-tags .symbol-tag');
     for (const tag of existing) {
         if (tag.textContent.replace('×', '').trim() === sym) return;
@@ -238,7 +449,6 @@ async function saveConfig(e) {
         else obj[lastKey] = value;
     }
 
-    // 处理未勾选的 checkbox
     document.querySelectorAll('input[type="checkbox"]:not(:checked):not(:disabled)').forEach(cb => {
         const parts = cb.name.split('.');
         let obj = config;
@@ -261,6 +471,39 @@ async function saveConfig(e) {
     } catch (e) {
         result.textContent = '❌ ' + e.message;
         result.className = 'result-msg error';
+    }
+}
+
+async function testExecConnection() {
+    const badge = document.getElementById('exec-conn-status');
+    badge.textContent = '连接中...';
+    badge.className = 'exec-conn-badge conn-unknown';
+    const form = document.getElementById('configForm');
+    const fd = new FormData(form);
+    const body = {
+        mode: fd.get('executor.mode') || 'demo',
+        exchange: fd.get('executor.exchange') || 'okx',
+        api_key: fd.get('executor.api_key') || '',
+        api_secret: fd.get('executor.api_secret') || '',
+        passphrase: fd.get('executor.passphrase') || '',
+    };
+    try {
+        const resp = await fetch('/api/executor/test-connection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const d = await resp.json();
+        if (d.ok) {
+            badge.textContent = `✅ ${d.mode} | $${(d.equity||0).toFixed(2)}`;
+            badge.className = 'exec-conn-badge conn-ok';
+        } else {
+            badge.textContent = '❌ ' + (d.error || '连接失败');
+            badge.className = 'exec-conn-badge conn-err';
+        }
+    } catch(e) {
+        badge.textContent = '❌ ' + e.message;
+        badge.className = 'exec-conn-badge conn-err';
     }
 }
 </script>

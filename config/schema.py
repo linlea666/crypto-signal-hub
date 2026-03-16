@@ -126,6 +126,63 @@ class SentinelConfig(BaseModel):
     )
 
 
+class ExecutorConfig(BaseModel):
+    """执行层配置（独立插件，默认关闭）"""
+    enabled: bool = Field(default=False, description="是否启用自动执行")
+    mode: str = Field(default="demo", description="demo=模拟盘 / live=实盘")
+    exchange: str = Field(default="okx", description="执行交易所")
+    api_key: str = Field(default="", description="交易所 API Key")
+    api_secret: str = Field(default="", description="交易所 API Secret")
+    passphrase: str = Field(default="", description="交易所 Passphrase（OKX 必填）")
+    # 风控参数
+    max_positions: int = Field(default=2, ge=1, le=10, description="最大同时持仓数")
+    max_position_pct: float = Field(
+        default=10.0, ge=1.0, le=50.0, description="单笔仓位占总权益百分比上限"
+    )
+    min_risk_reward: float = Field(
+        default=1.5, ge=1.0, le=5.0, description="最低盈亏比门槛"
+    )
+    daily_loss_limit_pct: float = Field(
+        default=5.0, ge=1.0, le=20.0, description="当日亏损占权益百分比上限（触发熔断）"
+    )
+    default_leverage: int = Field(default=3, ge=1, le=20, description="默认杠杆")
+    min_confidence: int = Field(
+        default=65, ge=0, le=100, description="最低信号信心度"
+    )
+    min_signal_strength: str = Field(
+        default="moderate", description="最低信号强度: strong / moderate"
+    )
+    auto_execute: bool = Field(
+        default=False, description="自动执行（False=仅记录不下单）"
+    )
+    # 分级资金分配（基于 PositionSize 档位）
+    light_position_pct: float = Field(
+        default=4.0, ge=1.0, le=20.0, description="LIGHT 档仓位占权益 %"
+    )
+    normal_position_pct: float = Field(
+        default=7.0, ge=2.0, le=30.0, description="NORMAL 档仓位占权益 %"
+    )
+    heavy_position_pct: float = Field(
+        default=11.0, ge=3.0, le=40.0, description="HEAVY 档仓位占权益 %"
+    )
+    enable_dynamic_sizing: bool = Field(
+        default=True, description="启用动态仓位调节（信心度/盈亏比/市场状态因子）"
+    )
+    consecutive_loss_shrink: bool = Field(
+        default=True, description="连亏自动缩仓"
+    )
+    enable_trailing_stop: bool = Field(
+        default=False, description="启用移动止损（TP1后SL移到盈亏平衡）"
+    )
+    enable_signal_export: bool = Field(
+        default=True, description="自动存档信号和执行记录"
+    )
+    # 策略预设
+    preset: str = Field(
+        default="balanced", description="参数预设: conservative/balanced/aggressive/custom"
+    )
+
+
 class GeneralConfig(BaseModel):
     """通用配置"""
     symbols: list[str] = Field(
@@ -152,5 +209,6 @@ class AppConfig(BaseModel):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
+    executor: ExecutorConfig = Field(default_factory=ExecutorConfig)
     # 标记是否完成过首次引导
     setup_completed: bool = False

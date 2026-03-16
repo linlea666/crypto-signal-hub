@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block title %}执行面板 - CryptoSignal Hub{% endblock %}
+
+{% block content %}
+<div class="executor-page">
+
+  <!-- 服务控制条 -->
+  <div class="exec-service-bar">
+    <div class="exec-service-left">
+      {% if status.get('enabled') %}
+        <span class="exec-status-dot dot-{{ 'ok' if status.get('initialized') else 'warn' }}"></span>
+        <span class="exec-status-text">{{ '运行中' if status.get('initialized') else '待初始化' }}</span>
+        <span class="exec-mode-indicator mode-{{ status.get('mode','demo') }}">
+          {{ '模拟盘' if status.get('mode')=='demo' else '实盘' }}
+        </span>
+      {% else %}
+        <span class="exec-status-dot dot-off"></span>
+        <span class="exec-status-text">已停止</span>
+      {% endif %}
+      <span class="exec-service-sep">|</span>
+      <span class="exec-service-info mono">
+        权益: ${{ "%.2f"|format(balance.get('equity', 0)) }}
+      </span>
+      <span class="exec-service-sep">|</span>
+      <span class="exec-service-info mono">
+        可用: ${{ "%.2f"|format(balance.get('available', 0)) }}
+      </span>
+    </div>
+    <div class="exec-service-right">
+      <a href="/config" class="btn btn-sm btn-outline">⚙️ 配置</a>
+    </div>
+  </div>
+
+  {% if status.get('mode') == 'live' and status.get('enabled') %}
+  <div class="executor-live-warning">
+    ⚠️ 实盘模式已激活 — 所有交易将使用真实资金
+  </div>
+  {% endif %}
+
+  {% if not status.get('enabled') %}
+  <div class="card" style="text-align:center;padding:3rem">
+    <h3>执行层未启用</h3>
+    <p style="color:var(--text-muted);margin:1rem 0">前往 <a href="/config">配置页</a> 启用执行层并配置 API 密钥</p>
+  </div>
+  {% else %}
+
+  <!-- 概览统计条 -->
+  <div class="exec-stats-strip">
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">待触发</div>
+      <div class="exec-stat-value mono">{{ status.get('pending_strategies', 0) }}</div>
+    </div>
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">今日交易</div>
+      <div class="exec-stat-value mono">{{ status.get('today', {}).get('trade_count', 0) }}</div>
+    </div>
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">今日盈亏</div>
+      {% set today_pnl = status.get('today', {}).get('total_pnl_usd', 0) %}
+      <div class="exec-stat-value mono {{ 'text-bullish' if today_pnl >= 0 else 'text-bearish' }}">
+        ${{ "%.2f"|format(today_pnl) }}
+      </div>
+    </div>
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">总胜率</div>
+      <div class="exec-stat-value mono">{{ status.get('overall', {}).get('win_rate', 0) }}%</div>
+    </div>
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">累计盈亏</div>
+      {% set total_pnl = status.get('overall', {}).get('total_pnl_usd', 0) %}
+      <div class="exec-stat-value mono {{ 'text-bullish' if total_pnl >= 0 else 'text-bearish' }}">
+        ${{ "%.2f"|format(total_pnl) }}
+      </div>
+    </div>
+    <div class="exec-stat-item">
+      <div class="exec-stat-label">总交易数</div>
+      <div class="exec-stat-value mono">{{ status.get('overall', {}).get('total_trades', 0) }}</div>
+    </div>
+  </div>
+
+  <!-- Tab 切换 -->
+  <div class="exec-tabs">
+    <button class="exec-tab active" data-tab="positions" onclick="switchExecTab('positions')">📊 持仓 & 订单</button>
+    <button class="exec-tab" data-tab="history" onclick="switchExecTab('history')">📋 历史记录</button>
+    <button class="exec-tab" data-tab="chart" onclick="switchExecTab('chart')">📈 盈亏曲线</button>
+    <button class="exec-tab" data-tab="logs" onclick="switchExecTab('logs')">🔧 执行日志</button>
+    <div class="exec-tab-actions">
+      <div class="exec-export-group">
+        <button class="btn btn-sm btn-outline" onclick="exportData('signals','csv')">📤 信号CSV</button>
+        <button class="btn btn-sm btn-outline" onclick="exportData('trades','csv')">📤 交易CSV</button>
+        <button class="btn btn-sm btn-outline" onclick="exportData('full','json')">📦 全量导出</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 内容: 持仓 & 订单 -->
+  <div class="exec-tab-panel" id="tab-positions">
+    <div class="exec-panel-grid">
+      <div class="card">
+        <div class="card-title">实时持仓</div>
+        {% if positions %}
+        <table class="executor-table">
+          <thead><tr>
+            <th>交易对</th><th>方向</th><th>数量</th><th>开仓价</th><th>杠杆</th><th>未实现盈亏</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            {% for p in positions %}
+            <tr>
+              <td class="mono">{{ p.symbol }}</td>
+              <td><span class="direction-tag dir-{{ p.side }}">{{ '多' if p.side=='long' else '空' }}</span></td>
+              <td class="mono">{{ "%.4f"|format(p.contracts) }}</td>
+              <td class="mono">${{ "%.2f"|format(p.entryPrice) }}</td>
+              <td class="mono">{{ p.leverage }}x</td>
+              <td class="mono {{ 'text-bullish' if p.unrealizedPnl >= 0 else 'text-bearish' }}">
+                ${{ "%.2f"|format(p.unrealizedPnl) }}
+              </td>
+              <td>
+                <button class="btn btn-sm btn-danger" onclick="closePosition('{{ p.symbol }}','{{ p.side }}')">平仓</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">暂无持仓</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">活跃订单</div>
+        {% if active_orders %}
+        <table class="executor-table">
+          <thead><tr>
+            <th>交易对</th><th>策略</th><th>方向</th><th>状态</th>
+            <th>触发价</th><th>止损</th><th>止盈</th><th>盈亏比</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            {% for o in active_orders %}
+            <tr>
+              <td class="mono">{{ o.symbol }}</td>
+              <td>{{ o.strategy_type }}</td>
+              <td><span class="direction-tag dir-{{ 'long' if o.side=='buy' else 'short' }}">{{ '多' if o.side=='buy' else '空' }}</span></td>
+              <td><span class="order-status status-{{ o.status }}">{{ o.status }}</span></td>
+              <td class="mono">${{ "%.0f"|format(o.trigger_price) }}</td>
+              <td class="mono text-bearish">${{ "%.0f"|format(o.stop_loss) }}</td>
+              <td class="mono text-bullish">${{ "%.0f"|format(o.take_profit_1) }}</td>
+              <td class="mono">{{ "%.2f"|format(o.risk_reward) }}</td>
+              <td>
+                {% if o.status == 'pending' %}
+                <button class="btn btn-sm btn-outline" onclick="cancelOrder('{{ o.id }}')">取消</button>
+                {% elif o.status == 'open' %}
+                <button class="btn btn-sm btn-danger" onclick="closePosition('{{ o.symbol }}','{{ 'long' if o.side=='buy' else 'short' }}','{{ o.id }}')">平仓</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">暂无活跃订单</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 内容: 历史记录 -->
+  <div class="exec-tab-panel" id="tab-history" style="display:none">
+    <div class="card">
+      <div class="card-title">交易记录</div>
+      {% if history %}
+      <table class="executor-table">
+        <thead><tr>
+          <th>时间</th><th>交易对</th><th>策略</th><th>方向</th>
+          <th>结果</th><th>入场价</th><th>盈亏</th><th>盈亏%</th>
+        </tr></thead>
+        <tbody>
+          {% for o in history %}
+          <tr>
+            <td class="mono" style="font-size:0.75rem">{{ (o.closed_at or o.created_at or '')[:16] }}</td>
+            <td class="mono">{{ o.symbol }}</td>
+            <td>{{ o.strategy_type }}</td>
+            <td><span class="direction-tag dir-{{ 'long' if o.side=='buy' else 'short' }}">{{ '多' if o.side=='buy' else '空' }}</span></td>
+            <td><span class="order-status status-{{ o.status }}">{{ o.status }}</span></td>
+            <td class="mono">${{ "%.0f"|format(o.entry_price) if o.entry_price else '-' }}</td>
+            <td class="mono {{ 'text-bullish' if (o.pnl_usd or 0) >= 0 else 'text-bearish' }}">
+              {{ "$%.2f"|format(o.pnl_usd) if o.pnl_usd else '-' }}
+            </td>
+            <td class="mono {{ 'text-bullish' if (o.pnl_pct or 0) >= 0 else 'text-bearish' }}">
+              {{ "%.2f%%"|format(o.pnl_pct) if o.pnl_pct else '-' }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">暂无历史记录</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Tab 内容: 盈亏曲线 -->
+  <div class="exec-tab-panel" id="tab-chart" style="display:none">
+    <div class="card">
+      <div class="card-title">累计盈亏曲线</div>
+      <div style="height:280px;position:relative">
+        <canvas id="pnlChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 内容: 执行日志 -->
+  <div class="exec-tab-panel" id="tab-logs" style="display:none">
+    <div class="card exec-log-card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>执行层日志</span>
+        <button class="btn btn-sm btn-outline" onclick="refreshLogs()">🔄 刷新</button>
+      </div>
+      <div class="exec-log-window" id="exec-log-content">
+        <div class="empty-state">加载中...</div>
+      </div>
+    </div>
+  </div>
+
+  {% endif %}
+</div>
+
+<script>
+/* ── Tab 切换 ── */
+function switchExecTab(tab) {
+  document.querySelectorAll('.exec-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.exec-tab-panel').forEach(p => p.style.display = 'none');
+  document.querySelector(`.exec-tab[data-tab="${tab}"]`).classList.add('active');
+  document.getElementById(`tab-${tab}`).style.display = 'block';
+  if (tab === 'chart') loadPnlChart();
+  if (tab === 'logs') refreshLogs();
+}
+
+/* ── 交易操作 ── */
+async function closePosition(symbol, side, orderId) {
+  if (!confirm(`确认平仓 ${symbol} ${side}?`)) return;
+  const body = {symbol, side};
+  if (orderId) body.order_id = orderId;
+  const r = await fetch('/api/executor/close', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (d.success) location.reload();
+  else alert(d.error || '平仓失败');
+}
+
+async function cancelOrder(orderId) {
+  if (!confirm('确认取消此订单?')) return;
+  const r = await fetch('/api/executor/cancel', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({order_id: orderId})
+  });
+  const d = await r.json();
+  if (d.success) location.reload();
+  else alert(d.error || '取消失败');
+}
+
+/* ── 盈亏图表 ── */
+let chartLoaded = false;
+async function loadPnlChart() {
+  if (chartLoaded) return;
+  try {
+    const r = await fetch('/api/executor/pnl-curve?days=30');
+    const d = await r.json();
+    if (!d.dates || d.dates.length === 0) return;
+    const ctx = document.getElementById('pnlChart');
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: d.dates.map(x => x.slice(5)),
+        datasets: [{
+          label: '累计盈亏 (USD)',
+          data: d.cumulative_pnl,
+          borderColor: d.cumulative_pnl[d.cumulative_pnl.length - 1] >= 0 ? '#10b981' : '#ef4444',
+          backgroundColor: d.cumulative_pnl[d.cumulative_pnl.length - 1] >= 0
+            ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+          fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: {size: 10} } },
+          y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: {size: 10}, callback: v => '$'+v } },
+        }
+      }
+    });
+    chartLoaded = true;
+  } catch(e) {}
+}
+
+/* ── 执行日志 ── */
+async function refreshLogs() {
+  const container = document.getElementById('exec-log-content');
+  try {
+    const r = await fetch('/api/executor/log?lines=80');
+    const d = await r.json();
+    if (!d.lines || d.lines.length === 0) {
+      container.innerHTML = '<div class="empty-state">暂无日志</div>';
+      return;
+    }
+    container.innerHTML = '';
+    d.lines.forEach(line => {
+      const div = document.createElement('div');
+      div.className = 'exec-log-line';
+      if (line.includes('ERROR') || line.includes('失败')) div.classList.add('log-error');
+      else if (line.includes('WARNING') || line.includes('拒绝')) div.classList.add('log-warn');
+      else if (line.includes('成功') || line.includes('INFO')) div.classList.add('log-ok');
+      div.textContent = line;
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state">加载失败</div>';
+  }
+}
+
+/* ── 导出 ── */
+function exportData(type, fmt) {
+  let url = `/api/export/${type}`;
+  if (fmt) url += `?fmt=${fmt}`;
+  window.open(url, '_blank');
+}
+</script>
+{% endblock %}

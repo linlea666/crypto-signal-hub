@@ -91,3 +91,33 @@ async def logs_page(request: Request):
     return request.app.state.templates.TemplateResponse("logs.html", {
         "request": request,
     })
+
+
+@router.get("/executor", response_class=HTMLResponse)
+async def executor_page(request: Request):
+    """执行面板页"""
+    scheduler = request.app.state.job_scheduler
+    executor = scheduler.executor if scheduler else None
+    config = request.app.state.config_manager.config
+
+    status = executor.get_status() if executor else {"enabled": False}
+    active_orders = executor.tracker.get_active_orders() if executor else []
+    history = executor.tracker.get_history(limit=20) if executor else []
+    balance = {}
+    positions = []
+    if executor and executor.client.is_connected:
+        try:
+            balance = await executor.client.get_balance()
+            positions = await executor.client.get_positions()
+        except Exception:
+            pass
+
+    return request.app.state.templates.TemplateResponse("executor.html", {
+        "request": request,
+        "config": config,
+        "status": status,
+        "active_orders": active_orders,
+        "history": history,
+        "balance": balance,
+        "positions": positions,
+    })

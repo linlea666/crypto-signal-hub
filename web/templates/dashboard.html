@@ -513,6 +513,36 @@
     </div>
 </div>
 
+<!-- ═══ 执行层摘要（启用时显示） ═══ -->
+<div id="executor-strip" style="display:none">
+<div class="overview-strip" style="margin-bottom:12px">
+    <div class="strip-card">
+        <div class="strip-label">执行层</div>
+        <div class="strip-value" id="exec-mode-badge">—</div>
+    </div>
+    <div class="strip-card">
+        <div class="strip-label">待触发</div>
+        <div class="strip-value mono" id="exec-pending">0</div>
+    </div>
+    <div class="strip-card">
+        <div class="strip-label">今日交易</div>
+        <div class="strip-value mono" id="exec-today-count">0</div>
+    </div>
+    <div class="strip-card">
+        <div class="strip-label">今日盈亏</div>
+        <div class="strip-value mono" id="exec-today-pnl">$0.00</div>
+    </div>
+    <div class="strip-card">
+        <div class="strip-label">总胜率</div>
+        <div class="strip-value mono" id="exec-win-rate">0%</div>
+    </div>
+    <div class="strip-card">
+        <div class="strip-label">累计盈亏</div>
+        <div class="strip-value mono" id="exec-total-pnl">$0.00</div>
+    </div>
+</div>
+</div>
+
 <!-- ═══ 底部状态栏 ═══ -->
 <div class="status-bar">
     <div class="status-bar-left">
@@ -527,4 +557,31 @@
         ▶ 立即分析 {{ active_symbol.split('/')[0] }}
     </button>
 </div>
+
+<script>
+(async function loadExecutorStrip() {
+    try {
+        const r = await fetch('/api/executor/status');
+        const d = await r.json();
+        if (!d.enabled) return;
+        document.getElementById('executor-strip').style.display = 'block';
+        const modeLabel = d.mode === 'demo' ? '模拟盘' : '实盘';
+        const modeClass = d.mode === 'demo' ? 'mode-demo' : 'mode-live';
+        document.getElementById('exec-mode-badge').innerHTML = `<span class="executor-mode-badge ${modeClass}">${modeLabel}</span>`;
+        document.getElementById('exec-pending').textContent = d.pending_strategies || 0;
+        const today = d.today || {};
+        document.getElementById('exec-today-count').textContent = today.trade_count || 0;
+        const todayPnl = today.total_pnl_usd || 0;
+        const todayEl = document.getElementById('exec-today-pnl');
+        todayEl.textContent = '$' + todayPnl.toFixed(2);
+        todayEl.className = 'strip-value mono ' + (todayPnl >= 0 ? 'text-bullish' : 'text-bearish');
+        const overall = d.overall || {};
+        document.getElementById('exec-win-rate').textContent = (overall.win_rate || 0) + '%';
+        const totalPnl = overall.total_pnl_usd || 0;
+        const totalEl = document.getElementById('exec-total-pnl');
+        totalEl.textContent = '$' + totalPnl.toFixed(2);
+        totalEl.className = 'strip-value mono ' + (totalPnl >= 0 ? 'text-bullish' : 'text-bearish');
+    } catch(e) {}
+})();
+</script>
 {% endblock %}

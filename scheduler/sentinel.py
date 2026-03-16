@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TriggerCallback = Callable[[str, str, AlertType], Awaitable[Any]]
+PriceTickCallback = Callable[[str, float], Awaitable[Any]]
 
 
 class SentinelMonitor:
@@ -41,10 +42,12 @@ class SentinelMonitor:
         self,
         config: "AppConfig",
         on_trigger: TriggerCallback,
+        on_price_tick: PriceTickCallback | None = None,
     ):
         self._config = config
         self._sentinel_cfg = config.sentinel
         self._on_trigger = on_trigger
+        self._on_price_tick = on_price_tick
 
         self._exchange: Any = None
         self._running = False
@@ -142,6 +145,12 @@ class SentinelMonitor:
 
         await self._check_level_breakout(symbol, price, now)
         await self._check_rapid_move(symbol, price, now)
+
+        if self._on_price_tick:
+            try:
+                await self._on_price_tick(symbol, price)
+            except Exception as e:
+                logger.warning("on_price_tick 回调异常 %s: %s", symbol, e)
 
     async def _check_level_breakout(
         self, symbol: str, price: float, now: datetime,

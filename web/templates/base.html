@@ -15,6 +15,7 @@
 
         <div class="nav-links">
             <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">大屏</a>
+            <a href="/executor" class="{% if request.url.path == '/executor' %}active{% endif %}">执行</a>
             <a href="/history" class="{% if request.url.path == '/history' %}active{% endif %}">历史</a>
             <a href="/logs" class="{% if request.url.path == '/logs' %}active{% endif %}">日志</a>
             <a href="/config" class="{% if request.url.path == '/config' %}active{% endif %}">配置</a>

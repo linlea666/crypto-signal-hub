@@ -64,7 +64,18 @@ class JobScheduler:
         self._sentinel = SentinelMonitor(
             config=config,
             on_trigger=self._on_sentinel_trigger,
+            on_price_tick=self._on_price_tick,
         )
+        # 执行引擎（可选插件）
+        self._executor = None
+        if config.executor.enabled:
+            try:
+                from executor.engine import ExecutionEngine
+                from pathlib import Path
+                db_path = Path(db._path) if hasattr(db, '_path') else Path("data/signals.db")
+                self._executor = ExecutionEngine(config.executor, db_path)
+            except Exception as e:
+                logger.warning("执行引擎初始化失败: %s", e)
 
     @property
     def latest_reports(self) -> dict[str, dict]:
@@ -163,16 +174,24 @@ class JobScheduler:
     def start(self) -> None:
         self._scheduler.start()
         asyncio.create_task(self._sentinel.start())
+        if self._executor:
+            asyncio.create_task(self._executor.initialize())
         logger.info("调度器已启动")
 
     async def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
         await self._sentinel.stop()
+        if self._executor:
+            await self._executor.shutdown()
         logger.info("调度器已停止")
 
     @property
     def sentinel(self) -> SentinelMonitor:
         return self._sentinel
+
+    @property
+    def executor(self):
+        return self._executor
 
     async def run_now(self, symbol: str | None = None) -> dict | None:
         """手动立即执行一次分析（Web 界面的"立即分析"按钮）。
@@ -188,6 +207,11 @@ class JobScheduler:
         return result
 
     # ── 哨兵事件回调 ──
+
+    async def _on_price_tick(self, symbol: str, price: float) -> None:
+        """哨兵每次获取价格后回调，转发给执行引擎检查条件单"""
+        if self._executor:
+            await self._executor.on_price_tick(symbol, price)
 
     async def _on_sentinel_trigger(
         self, symbol: str, reason: str, alert_type: AlertType,
@@ -557,6 +581,13 @@ class JobScheduler:
 
             # 5. 更新哨兵缓存的关键位
             self._sentinel.update_levels(symbol, report.key_levels)
+
+            # 5.5 推送交易计划到执行层（如已启用）
+            if self._executor and report.trade_plan:
+                try:
+                    await self._executor.on_new_plan(symbol, report)
+                except Exception as e:
+                    logger.warning("执行层接收计划失败: %s", e)
 
             # 6. 通知分发（日报场景由调用方单独处理）
             if not skip_dispatch:
