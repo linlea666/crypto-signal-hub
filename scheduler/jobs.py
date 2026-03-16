@@ -107,6 +107,7 @@ class JobScheduler:
             logger.info("执行层已通过热重载停用")
         elif config.executor.enabled and self._executor:
             self._executor._config = config.executor
+            self._executor._guard._config = config.executor
             logger.info("执行层配置已更新")
 
         # NOFX 评分因子动态启停
