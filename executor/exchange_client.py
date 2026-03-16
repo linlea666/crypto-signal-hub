@@ -356,6 +356,47 @@ class ExchangeClient:
             logger.warning("修改止损失败 %s: %s", symbol, e)
             return False
 
+    async def set_take_profit(
+        self, symbol: str, side: str, tp_price: float, close_ratio: float = 1.0,
+    ) -> bool:
+        """为已有持仓设置止盈算法单（OKX conditional order）
+
+        close_ratio < 1.0 时为部分止盈（closeFraction）。
+        """
+        if not self._exchange:
+            return False
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
+        inst_id = swap_symbol.replace("/", "-")
+        pos_side = "long" if side == "buy" else "short"
+        close_side = "sell" if side == "buy" else "buy"
+
+        params: dict = {
+            "instId": inst_id,
+            "tdMode": "cross",
+            "side": close_side,
+            "posSide": pos_side,
+            "ordType": "conditional",
+            "tpTriggerPx": str(tp_price),
+            "tpOrdPx": "-1",
+            "sz": "",
+        }
+
+        if 0 < close_ratio < 1.0:
+            params["closeFraction"] = str(round(close_ratio, 2))
+        else:
+            params["closeFraction"] = "1"
+
+        try:
+            await self._exchange.private_post_trade_order_algo(params)
+            logger.info(
+                "设置止盈成功 %s %s TP=%.2f (平%.0f%%)",
+                symbol, pos_side, tp_price, close_ratio * 100,
+            )
+            return True
+        except Exception as e:
+            logger.warning("设置止盈失败 %s: %s", symbol, e)
+            return False
+
     async def get_min_order_amount(self, symbol: str) -> float:
         """获取最小下单数量"""
         if not self._exchange:

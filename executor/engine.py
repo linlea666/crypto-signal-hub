@@ -127,11 +127,24 @@ class ExecutionEngine:
 
         await self._expire_symbol(symbol)
 
+        # 检查该品种已有的 OPEN 持仓方向，避免同方向重复开仓
+        open_sides = set()
+        for o in self._tracker.get_open_orders():
+            if o["symbol"] == symbol:
+                open_sides.add(o["side"])
+
         now = now_beijing()
         registered = 0
 
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
+
+            if side in open_sides:
+                logger.debug(
+                    "跳过 %s %s: 已有同方向持仓",
+                    symbol, s.strategy_type,
+                )
+                continue
 
             if s.position_size.value != "skip":
                 if s.risk_reward < self._config.min_risk_reward:
@@ -475,6 +488,7 @@ class ExecutionEngine:
                     "限价单成交 [%s] %s @ %.2f qty=%.4f",
                     info["symbol"], info["side"], entry_price, filled,
                 )
+                await self._set_tp_on_fill(sid, info)
             elif status["status"] == "canceled":
                 self._tracker.update_status(
                     sid, OrderStatus.LIMIT_CANCELLED,
@@ -504,6 +518,7 @@ class ExecutionEngine:
                 "限价单取消前已成交 [%s] @ %.2f",
                 info["symbol"], entry_price,
             )
+            await self._set_tp_on_fill(strat_id, info)
             return
 
         await self._client.cancel_order(info["symbol"], info["exchange_order_id"])
@@ -512,6 +527,45 @@ class ExecutionEngine:
             reject_reason=f"限价单取消: {reason}",
         )
         logger.info("取消限价单 [%s] %s: %s", info["symbol"], strat_id[:8], reason)
+
+    async def _set_tp_on_fill(self, strat_id: str, info: dict) -> None:
+        """限价单成交后，立即在交易所设置 TP1 止盈单。
+
+        hybrid 模式：TP1 平 close_ratio 部分仓位，剩余由移动止盈管理。
+        fixed 模式：TP1 平全部仓位。
+        """
+        order = self._tracker.get_order(strat_id)
+        if not order:
+            return
+
+        tp1 = order.get("take_profit_1", 0)
+        if not tp1 or tp1 <= 0:
+            return
+
+        symbol = info["symbol"]
+        side = info["side"]
+        tp_mode = info.get("tp_mode", "hybrid")
+        close_ratio = info.get("tp1_close_ratio", 0.5)
+
+        if tp_mode == "hybrid":
+            ok = await self._client.set_take_profit(
+                symbol, side, tp1, close_ratio=close_ratio,
+            )
+        else:
+            ok = await self._client.set_take_profit(
+                symbol, side, tp1, close_ratio=1.0,
+            )
+
+        if ok:
+            logger.info(
+                "限价单成交后设置TP1 [%s] %s TP=%.2f (平%.0f%%)",
+                symbol, side, tp1, (close_ratio if tp_mode == "hybrid" else 1.0) * 100,
+            )
+        else:
+            logger.warning(
+                "限价单成交后设置TP1失败 [%s]，将由移动止盈程序兜底",
+                symbol,
+            )
 
     async def _recover_limit_orders(self) -> None:
         """启动时恢复或清理未完成的限价单"""
@@ -543,6 +597,13 @@ class ExecutionEngine:
                     opened_at=now_beijing().isoformat(),
                 )
                 logger.info("恢复限价单(已成交) [%s] @ %.2f", symbol, entry_price)
+                recover_info = {
+                    "symbol": symbol,
+                    "side": order.get("side", "buy"),
+                    "tp_mode": order.get("tp_mode", "hybrid"),
+                    "tp1_close_ratio": order.get("tp1_close_ratio", 0.5),
+                }
+                await self._set_tp_on_fill(sid, recover_info)
             elif status["status"] == "open":
                 valid_until_str = order.get("created_at", "")
                 try:
@@ -759,16 +820,31 @@ class ExecutionEngine:
             tp1_reached = (is_long and price >= tp1) or (not is_long and price <= tp1)
 
             # ── 阶段一 → 阶段二：TP1 首次触发 ──
+            # 交易所 TP1 algo order 会自动部分平仓（由 _set_tp_on_fill 设置）
+            # 程序只需检测到 TP1 价格已到达，执行：移 SL 到入场价 + 开始追踪
+            # 如果交易所 TP1 algo 漏设（旧订单），程序兜底 reduce_position
             if tp1_reached and not tp1_triggered:
                 if tp_mode == "hybrid" and close_ratio > 0:
-                    ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
-                    if ok:
-                        logger.info(
-                            "TP1触发部分平仓 [%s] %s 平%.0f%% @ %.2f",
-                            order["symbol"], side, close_ratio * 100, price,
-                        )
+                    # 检查交易所是否有 TP algo 已存在
+                    algos = await self._client.fetch_algo_orders(order["symbol"])
+                    pos_side = "long" if is_long else "short"
+                    has_tp_algo = any(
+                        a.get("posSide") == pos_side and a.get("tpTriggerPx")
+                        for a in algos
+                    )
+                    if not has_tp_algo:
+                        # 无交易所 TP → 程序兜底执行部分平仓
+                        ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
+                        if ok:
+                            logger.info(
+                                "TP1程序兜底平仓 [%s] %s 平%.0f%% @ %.2f",
+                                order["symbol"], side, close_ratio * 100, price,
+                            )
                     else:
-                        logger.warning("TP1部分平仓失败 [%s] %s", order["symbol"], side)
+                        logger.info(
+                            "TP1由交易所算法单执行 [%s] %s @ %.2f",
+                            order["symbol"], side, price,
+                        )
 
                 new_sl = entry
                 await self._amend_sl_on_exchange(order, new_sl)
