@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +27,8 @@ if TYPE_CHECKING:
     from storage.database import Database
     from collectors.registry import CollectorRegistry
 
+logger = logging.getLogger(__name__)
+
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
@@ -41,10 +45,28 @@ def create_app(
     health_checker: "HealthChecker | None" = None,
 ) -> FastAPI:
     """创建并配置 FastAPI 应用实例"""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        logger.info("正在初始化采集器...")
+        await collector_registry.initialize_all()
+        logger.info("正在配置调度任务...")
+        job_scheduler.setup()
+        job_scheduler.start()
+        if health_checker:
+            logger.info("执行首次健康检查...")
+            await health_checker.check_all()
+        logger.info("✅ 系统启动完成")
+        yield
+        await job_scheduler.stop()
+        await collector_registry.cleanup_all()
+        logger.info("系统已安全关闭")
+
     app = FastAPI(
         title=APP_NAME,
         version=VERSION,
         docs_url="/api/docs",
+        lifespan=lifespan,
     )
 
     app.state.config_manager = config_manager

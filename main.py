@@ -12,7 +12,6 @@ Docker 方式：见 Dockerfile / docker-compose.yml
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import logging.handlers
 import os
@@ -66,11 +65,12 @@ def setup_logging() -> None:
         logging.getLogger(lib).setLevel(logging.WARNING)
 
 
-def build_services(config_manager: ConfigManager):
-    """组装所有服务，建立依赖关系。
+def build_services(config_manager: ConfigManager) -> "FastAPI":
+    """组装所有服务，建立依赖关系并返回 FastAPI 应用实例。
 
     这是整个系统的依赖注入入口。
     所有模块的依赖都在此显式声明，不使用全局状态。
+    启动/关闭流程由 FastAPI lifespan 管理（见 web/app.py）。
     """
     config = config_manager.config
 
@@ -147,9 +147,9 @@ def build_services(config_manager: ConfigManager):
         ai_config=config.ai,
     )
 
-    # ── 8. Web 应用 ──
+    # ── 8. Web 应用（lifespan 管理启动/关闭） ──
     from web.app import create_app
-    app = create_app(
+    return create_app(
         config_manager=config_manager,
         db=db,
         job_scheduler=job_scheduler,
@@ -157,28 +157,9 @@ def build_services(config_manager: ConfigManager):
         health_checker=health_checker,
     )
 
-    return app, job_scheduler, collector_registry, health_checker
-
-
-async def startup(job_scheduler, collector_registry, health_checker):
-    """异步启动流程"""
-    logger = logging.getLogger(__name__)
-    logger.info("正在初始化采集器...")
-    await collector_registry.initialize_all()
-
-    logger.info("正在配置调度任务...")
-    job_scheduler.setup()
-    job_scheduler.start()
-
-    logger.info("执行首次健康检查...")
-    await health_checker.check_all()
-
-    logger.info("✅ 系统启动完成")
-
 
 def main():
     """主入口函数"""
-    # 确保 data 目录存在
     (PROJECT_ROOT / "data").mkdir(exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -188,25 +169,12 @@ def main():
     logger.info("  %s v%s", APP_NAME, VERSION)
     logger.info("=" * 50)
 
-    # 加载配置
     config_manager = ConfigManager()
     if config_manager.is_first_run:
         config_manager.generate_default()
         logger.info("首次运行，已生成默认配置文件")
 
-    # 组装服务
-    app, job_scheduler, collector_registry, health_checker = build_services(config_manager)
-
-    # 注册启动事件
-    @app.on_event("startup")
-    async def on_startup():
-        await startup(job_scheduler, collector_registry, health_checker)
-
-    @app.on_event("shutdown")
-    async def on_shutdown():
-        await job_scheduler.stop()
-        await collector_registry.cleanup_all()
-        logger.info("系统已安全关闭")
+    app = build_services(config_manager)
 
     # Docker 环境下不打开浏览器
     host = os.environ.get("CSH_HOST", "127.0.0.1")
