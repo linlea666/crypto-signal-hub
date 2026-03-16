@@ -65,9 +65,15 @@ class TechnicalFactor(ScoreFactor):
             if tech.rsi_4h > 80:
                 score -= 2
                 details_parts.append(f"RSI={tech.rsi_4h:.0f}(超买-2)")
+            elif tech.rsi_4h > 70:
+                score -= 1
+                details_parts.append(f"RSI={tech.rsi_4h:.0f}(偏超买-1)")
             elif tech.rsi_4h < 20:
                 score += 2
                 details_parts.append(f"RSI={tech.rsi_4h:.0f}(超卖+2)")
+            elif tech.rsi_4h < 30:
+                score += 1
+                details_parts.append(f"RSI={tech.rsi_4h:.0f}(偏超卖+1)")
             else:
                 details_parts.append(f"RSI={tech.rsi_4h:.0f}")
 

@@ -46,11 +46,12 @@ def classify_from_snapshot(
     )
 
 
-def get_trend_direction(total_score: float) -> Direction:
+def get_trend_direction(total_score: float, max_possible: float = 120.0) -> Direction:
     """从评分中提取趋势方向（用于策略约束）。"""
-    if total_score > 5:
+    threshold = max(8.0, max_possible * 0.08)
+    if total_score > threshold:
         return Direction.BULLISH
-    if total_score < -5:
+    if total_score < -threshold:
         return Direction.BEARISH
     return Direction.NEUTRAL
 
@@ -87,7 +88,7 @@ def _is_extreme_divergence(derivatives: DerivativesData) -> bool:
         return False
 
     fr_extreme = fr.level in (FundingRateLevel.EXTREME_HIGH, FundingRateLevel.EXTREME_LOW)
-    oi_anomaly = abs(oi.change_pct_24h) > 15
+    oi_anomaly = abs(oi.change_pct_24h) > 20
 
     return fr_extreme and oi_anomaly
 

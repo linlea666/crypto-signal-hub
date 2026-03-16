@@ -59,15 +59,15 @@ class SignalScorer:
         strategy_mode: str = "adaptive",
     ) -> SignalReport:
         """执行完整评分流程，生成信号报告。"""
-        # 1. 逐因子评分
+        # 1. 逐因子评分（按配置权重加权）
         factor_scores = self._calculate_all_factors(snapshot)
 
         # 2. 汇总得分
         total_score = sum(fs.score for fs in factor_scores)
         max_possible = sum(fs.max_score for fs in factor_scores)
 
-        # 3. 判断方向
-        direction = self._determine_direction(total_score)
+        # 3. 判断方向（动态阈值：满分的 8%）
+        direction = self._determine_direction(total_score, max_possible)
 
         # 4. 计算信心度
         confidence = calculate_confidence(factor_scores)
@@ -120,15 +120,28 @@ class SignalScorer:
     def _calculate_all_factors(
         self, snapshot: MarketSnapshot
     ) -> list[FactorScore]:
-        """执行所有因子评分，单个因子异常不影响整体"""
+        """执行所有因子评分，按配置权重缩放，单个因子异常不影响整体。"""
         results: list[FactorScore] = []
         for factor in self._factors:
             factor_config = self._config.get_factor_config(factor.name)
             if not factor_config.enabled:
                 continue
             try:
-                score = factor.calculate(snapshot)
-                results.append(score)
+                raw_score = factor.calculate(snapshot)
+                # 按配置权重缩放：config_weight / factor_max_score
+                cfg_weight = factor_config.weight
+                if raw_score.max_score > 0 and cfg_weight != raw_score.max_score:
+                    scale = cfg_weight / raw_score.max_score
+                    scaled = FactorScore(
+                        name=raw_score.name,
+                        score=round(raw_score.score * scale, 1),
+                        max_score=cfg_weight,
+                        direction=raw_score.direction,
+                        details=raw_score.details,
+                    )
+                    results.append(scaled)
+                else:
+                    results.append(raw_score)
             except Exception as e:
                 logger.error("因子 %s 评分异常: %s", factor.name, e, exc_info=True)
                 results.append(FactorScore(
@@ -141,11 +154,13 @@ class SignalScorer:
         return results
 
     @staticmethod
-    def _determine_direction(total_score: float) -> Direction:
-        # 微小得分视为中性，避免噪音信号
-        if total_score > 5:
+    def _determine_direction(
+        total_score: float, max_possible: float = 120.0,
+    ) -> Direction:
+        threshold = max(8.0, max_possible * 0.08)
+        if total_score > threshold:
             return Direction.BULLISH
-        if total_score < -5:
+        if total_score < -threshold:
             return Direction.BEARISH
         return Direction.NEUTRAL
 

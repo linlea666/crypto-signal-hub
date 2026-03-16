@@ -31,25 +31,42 @@ class OpenInterestFactor(ScoreFactor):
         score = 0.0
         details_parts: list[str] = []
 
-        signal_scores = {
-            OIPriceSignal.NEW_LONGS: 15,
-            OIPriceSignal.SHORT_COVERING: 5,
-            OIPriceSignal.NEW_SHORTS: -15,
-            OIPriceSignal.LONG_LIQUIDATION: -5,
-        }
-        score = float(signal_scores.get(oi.price_oi_signal, 0))
-
         signal_labels = {
-            OIPriceSignal.NEW_LONGS: "价涨+OI涨=新多头入场(趋势强)",
-            OIPriceSignal.SHORT_COVERING: "价涨+OI跌=空头平仓(弱反弹)",
-            OIPriceSignal.NEW_SHORTS: "价跌+OI涨=新空头入场(趋势强)",
-            OIPriceSignal.LONG_LIQUIDATION: "价跌+OI跌=多头平仓(弱下跌)",
+            OIPriceSignal.NEW_LONGS: "价涨+OI涨=新多头入场",
+            OIPriceSignal.SHORT_COVERING: "价涨+OI跌=空头平仓",
+            OIPriceSignal.NEW_SHORTS: "价跌+OI涨=新空头入场",
+            OIPriceSignal.LONG_LIQUIDATION: "价跌+OI跌=多头平仓",
         }
         details_parts.append(signal_labels.get(oi.price_oi_signal, "信号不明"))
 
+        # 按 OI 变化幅度分级评分（替代固定满分）
+        oi_abs = abs(oi.change_pct_24h)
+        if oi_abs < 1.0:
+            magnitude = 0.0  # 微波动不计入
+        elif oi_abs < 3.0:
+            magnitude = 5.0
+        elif oi_abs < 10.0:
+            magnitude = 10.0
+        else:
+            magnitude = 15.0
+
+        strong_signals = {OIPriceSignal.NEW_LONGS, OIPriceSignal.NEW_SHORTS}
+        if oi.price_oi_signal in strong_signals:
+            base = magnitude
+        else:
+            base = min(magnitude * 0.4, 5.0)
+
+        if oi.price_oi_signal in (OIPriceSignal.NEW_LONGS, OIPriceSignal.SHORT_COVERING):
+            score = base
+        else:
+            score = -base
+
+        strength_label = "弱" if oi_abs < 3 else ("中" if oi_abs < 10 else "强")
+        details_parts.append(f"OI变化{oi.change_pct_24h:+.1f}%({strength_label})")
+
         if oi.total_usd > 0:
             oi_display = f"${oi.total_usd / 1e9:.2f}B" if oi.total_usd > 1e9 else f"${oi.total_usd / 1e6:.0f}M"
-            details_parts.append(f"OI总量{oi_display}, 24h变化{oi.change_pct_24h:+.1f}%")
+            details_parts.append(f"OI总量{oi_display}")
 
         score = max(-self._max, min(self._max, score))
         direction = Direction.BULLISH if score > 0 else (

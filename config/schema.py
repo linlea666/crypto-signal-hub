@@ -31,6 +31,7 @@ class ScoringConfig(BaseModel):
     options: FactorWeightConfig = FactorWeightConfig(weight=20.0)
     macro: FactorWeightConfig = FactorWeightConfig(weight=20.0)
     sentiment: FactorWeightConfig = FactorWeightConfig(weight=15.0)
+    nofx_signal: FactorWeightConfig = FactorWeightConfig(weight=10.0, enabled=False)
 
     def get_factor_config(self, name: str) -> FactorWeightConfig:
         return getattr(self, name, FactorWeightConfig())
@@ -126,6 +127,14 @@ class SentinelConfig(BaseModel):
     )
 
 
+class NofxConfig(BaseModel):
+    """NOFX 外部数据源配置"""
+    enabled: bool = Field(default=False, description="是否启用 NOFX 数据源")
+    api_key: str = Field(default="", description="NOFX API Key")
+    base_url: str = Field(default="https://nofxos.ai", description="NOFX API 基础 URL")
+    cache_ttl: int = Field(default=300, ge=60, le=1800, description="数据缓存 TTL（秒）")
+
+
 class ExecutorConfig(BaseModel):
     """执行层配置（独立插件，默认关闭）"""
     enabled: bool = Field(default=False, description="是否启用自动执行")
@@ -210,5 +219,6 @@ class AppConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     executor: ExecutorConfig = Field(default_factory=ExecutorConfig)
+    nofx: NofxConfig = Field(default_factory=NofxConfig)
     # 标记是否完成过首次引导
     setup_completed: bool = False

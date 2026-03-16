@@ -30,30 +30,48 @@ class LongShortFactor(ScoreFactor):
         score = 0.0
         details_parts: list[str] = []
 
-        # ── 账户多空比评分（反向指标，主体 ±12 分）──
+        # ── 散户账户多空比（反向指标，±10 分）──
         ratio = ls.account_ratio
         if ratio > 2.0:
-            score = -12
-            details_parts.append(f"多空比{ratio:.2f}(散户极度做多=反向做空)")
+            score = -10
+            details_parts.append(f"散户多空比{ratio:.2f}(极度做多=反向做空)")
         elif ratio > 1.5:
             score = -6
-            details_parts.append(f"多空比{ratio:.2f}(偏多,警惕)")
+            details_parts.append(f"散户多空比{ratio:.2f}(偏多)")
+        elif ratio > 1.2:
+            score = -3
+            details_parts.append(f"散户多空比{ratio:.2f}(略偏多)")
         elif ratio < 0.5:
-            score = 12
-            details_parts.append(f"多空比{ratio:.2f}(散户极度做空=反向做多)")
+            score = 10
+            details_parts.append(f"散户多空比{ratio:.2f}(极度做空=反向做多)")
         elif ratio < 0.8:
             score = 6
-            details_parts.append(f"多空比{ratio:.2f}(偏空)")
+            details_parts.append(f"散户多空比{ratio:.2f}(偏空)")
+        elif ratio < 0.9:
+            score = 3
+            details_parts.append(f"散户多空比{ratio:.2f}(略偏空)")
         else:
-            details_parts.append(f"多空比{ratio:.2f}(均衡)")
+            details_parts.append(f"散户多空比{ratio:.2f}(均衡)")
 
-        # ── Taker 买卖量比辅助（±3 分）──
+        # ── 大户多空比（同向确认/背离警示，±3 分）──
+        top = ls.top_trader_ratio
+        if top != ratio:
+            if top > 1.5:
+                score -= 3
+                details_parts.append(f"大户多空比{top:.2f}(偏多→反向)")
+            elif top < 0.7:
+                score += 3
+                details_parts.append(f"大户多空比{top:.2f}(偏空→反向)")
+            else:
+                details_parts.append(f"大户多空比{top:.2f}")
+
+        # ── Taker 买卖量比辅助（±2 分）──
         taker = ls.taker_buy_sell_ratio
-        if taker > 1.1:
-            score += 3
+        if taker > 1.15:
+            score += 2
             details_parts.append(f"主动买入主导({taker:.2f})")
-        elif taker < 0.9:
-            score -= 3
+        elif taker < 0.85:
+            score -= 2
             details_parts.append(f"主动卖出主导({taker:.2f})")
 
         score = max(-self._max, min(self._max, score))

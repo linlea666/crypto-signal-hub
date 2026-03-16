@@ -19,6 +19,7 @@ from core.models import (
     OpenInterestData,
     PriceData,
     TechnicalData,
+    NofxData,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class CollectorRegistry:
             ),
             options=data.get("options"),
             macro=data.get("macro"),
+            nofx=data.get("nofx"),
             events=data.get("events", []),
             orderbook_clusters=data.get("orderbook_clusters", {}),
         )

@@ -38,12 +38,18 @@ class SentimentFactor(ScoreFactor):
             elif fg_value <= 25:
                 score += 5
                 details_parts.append(f"恐惧贪婪={fg_value}({fg_label},恐惧)")
+            elif fg_value <= 40:
+                score += 2
+                details_parts.append(f"恐惧贪婪={fg_value}({fg_label},偏恐惧)")
             elif fg_value >= 85:
                 score -= 10
                 details_parts.append(f"恐惧贪婪={fg_value}({fg_label},极度贪婪=反向做空)")
             elif fg_value >= 75:
                 score -= 5
                 details_parts.append(f"恐惧贪婪={fg_value}({fg_label},贪婪)")
+            elif fg_value >= 60:
+                score -= 2
+                details_parts.append(f"恐惧贪婪={fg_value}({fg_label},偏贪婪)")
             else:
                 details_parts.append(f"恐惧贪婪={fg_value}({fg_label})")
         else:

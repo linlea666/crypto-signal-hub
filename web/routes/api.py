@@ -183,6 +183,7 @@ def _reload_all_services(app) -> None:
             exchange_config=config.exchanges,
             email_config=config.email,
             ai_config=config.ai,
+            nofx_config=config.nofx,
         )
 
 

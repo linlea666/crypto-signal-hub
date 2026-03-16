@@ -91,6 +91,10 @@ def build_services(config_manager: ConfigManager) -> "FastAPI":
     collector_registry.register(OptionsCollector(config.exchanges))
     collector_registry.register(CalendarCollector())
 
+    if config.nofx.enabled and config.nofx.api_key:
+        from collectors.nofx import NofxCollector
+        collector_registry.register(NofxCollector(config.nofx))
+
     # ── 3. 评分引擎 ──
     from engine.scorer import SignalScorer
     from engine.factors.technical import TechnicalFactor
@@ -100,6 +104,7 @@ def build_services(config_manager: ConfigManager) -> "FastAPI":
     from engine.factors.options_factor import OptionsFactor
     from engine.factors.macro import MacroFactor
     from engine.factors.sentiment import SentimentFactor
+    from engine.factors.nofx_signal import NofxSignalFactor
 
     scorer = SignalScorer(config.scoring)
     factor_classes = [
@@ -110,6 +115,7 @@ def build_services(config_manager: ConfigManager) -> "FastAPI":
         (OptionsFactor, config.scoring.options),
         (MacroFactor, config.scoring.macro),
         (SentimentFactor, config.scoring.sentiment),
+        (NofxSignalFactor, config.scoring.nofx_signal),
     ]
     for factor_cls, factor_config in factor_classes:
         if factor_config.enabled:
@@ -145,6 +151,7 @@ def build_services(config_manager: ConfigManager) -> "FastAPI":
         exchange_config=config.exchanges,
         email_config=config.email,
         ai_config=config.ai,
+        nofx_config=config.nofx,
     )
 
     # ── 8. Web 应用（lifespan 管理启动/关闭） ──

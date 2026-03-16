@@ -49,8 +49,9 @@ def calculate_confidence(factor_scores: list[FactorScore]) -> float:
     else:
         weighted_consistency = basic_consistency
 
-    # 综合信心度 = 基础一致性 40% + 加权一致性 60%
-    confidence = basic_consistency * 0.4 + weighted_consistency * 0.6
+    # 综合信心度 = 基础一致性 25% + 加权一致性 75%
+    # 强信号的方向比弱信号的数量更重要
+    confidence = basic_consistency * 0.25 + weighted_consistency * 0.75
 
     # 因子数量不足时降低信心度
     all_count = len(factor_scores)

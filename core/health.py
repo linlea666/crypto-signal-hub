@@ -18,7 +18,7 @@ from enum import Enum
 import ccxt.async_support as ccxt
 import httpx
 
-from config.schema import AIConfig, EmailConfig, ExchangeConfig
+from config.schema import AIConfig, EmailConfig, ExchangeConfig, NofxConfig
 from core.time_utils import now_beijing
 
 logger = logging.getLogger(__name__)
@@ -77,10 +77,12 @@ class HealthChecker:
         exchange_config: ExchangeConfig,
         email_config: EmailConfig,
         ai_config: AIConfig,
+        nofx_config: NofxConfig | None = None,
     ):
         self._exchange_config = exchange_config
         self._email_config = email_config
         self._ai_config = ai_config
+        self._nofx_config = nofx_config or NofxConfig()
         self._last_report: HealthReport | None = None
 
     @property
@@ -92,6 +94,7 @@ class HealthChecker:
         exchange_config: ExchangeConfig | None = None,
         email_config: EmailConfig | None = None,
         ai_config: AIConfig | None = None,
+        nofx_config: NofxConfig | None = None,
     ) -> None:
         """热更新配置引用，供 Web 配置保存后调用"""
         if exchange_config is not None:
@@ -100,6 +103,8 @@ class HealthChecker:
             self._email_config = email_config
         if ai_config is not None:
             self._ai_config = ai_config
+        if nofx_config is not None:
+            self._nofx_config = nofx_config
 
     async def check_all(self) -> HealthReport:
         """并行执行所有探针，汇总健康报告"""
@@ -111,6 +116,7 @@ class HealthChecker:
             self._probe_fear_greed(),
             self._probe_ai(),
             self._probe_smtp(),
+            self._probe_nofx(),
             return_exceptions=True,
         )
 
@@ -309,6 +315,39 @@ class HealthChecker:
         except Exception as e:
             return ProbeResult(
                 name=f"邮件 ({cfg.smtp_host})",
+                status=HealthStatus.ERROR,
+                message=str(e)[:100],
+                last_check=now,
+            )
+
+    async def _probe_nofx(self) -> ProbeResult:
+        """探测 NOFX API 可用性"""
+        now = now_beijing().isoformat()
+        if not self._nofx_config.enabled or not self._nofx_config.api_key:
+            return ProbeResult(
+                name="NOFX 数据源",
+                status=HealthStatus.UNKNOWN,
+                message="未配置",
+                last_check=now,
+            )
+        try:
+            url = f"{self._nofx_config.base_url.rstrip('/')}/api/query-rank/list"
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
+                resp = await client.get(url, params={"auth": self._nofx_config.api_key})
+                resp.raise_for_status()
+            latency = (time.monotonic() - start) * 1000
+            status = HealthStatus.OK if latency < SLOW_THRESHOLD_MS else HealthStatus.DEGRADED
+            return ProbeResult(
+                name="NOFX 数据源",
+                status=status,
+                latency_ms=round(latency, 0),
+                message=f"响应 {latency:.0f}ms",
+                last_check=now,
+            )
+        except Exception as e:
+            return ProbeResult(
+                name="NOFX 数据源",
                 status=HealthStatus.ERROR,
                 message=str(e)[:100],
                 last_check=now,

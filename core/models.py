@@ -117,6 +117,27 @@ class MacroData:
 
 
 @dataclass(frozen=True)
+class NofxData:
+    """NOFX 外部数据（AI300 信号 + 资金净流 + 订单簿热力图 + 查询热度）"""
+    # AI300 量化信号
+    ai300_signal: str = ""        # S / A / B / C / D / ""
+    ai300_direction: str = ""     # long / short / ""
+    ai300_rank: int = 0           # 排名位次，0=不在榜单
+    # 资金净流
+    netflow_total: float = 0.0    # 净流量（正=流入，负=流出）
+    netflow_inst: float = 0.0     # 机构净流
+    netflow_retail: float = 0.0   # 散户净流
+    # 热力图 — 订单簿 delta
+    heatmap_bid_total: float = 0.0   # 买盘总量
+    heatmap_ask_total: float = 0.0   # 卖盘总量
+    heatmap_delta: float = 0.0       # bid - ask
+    heatmap_large_bids: list[float] = field(default_factory=list)
+    heatmap_large_asks: list[float] = field(default_factory=list)
+    # 社区查询热度
+    query_rank: int = 0           # 查询排名位次，0=未上榜
+
+
+@dataclass(frozen=True)
 class UpcomingEvent:
     """即将到来的经济事件"""
     name: str
@@ -147,6 +168,7 @@ class MarketSnapshot:
     derivatives: DerivativesData = field(default_factory=DerivativesData)
     options: OptionsData | None = None
     macro: MacroData | None = None
+    nofx: NofxData | None = None
     events: list[UpcomingEvent] = field(default_factory=list)
     orderbook_clusters: dict = field(default_factory=dict)
 

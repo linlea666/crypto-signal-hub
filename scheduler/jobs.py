@@ -637,6 +637,7 @@ class JobScheduler:
         "options": "期权数据",
         "macro": "宏观环境",
         "sentiment": "市场情绪",
+        "nofx_signal": "NOFX交叉验证",
     }
     _SOURCE_LABELS = {
         "MA20": "20日均线",

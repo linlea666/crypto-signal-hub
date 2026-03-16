@@ -7,7 +7,8 @@
 
     const FACTOR_KEYS = [
         'technical', 'funding_rate', 'open_interest',
-        'long_short_ratio', 'options', 'macro', 'sentiment'
+        'long_short_ratio', 'options', 'macro', 'sentiment',
+        'nofx_signal'
     ];
 
     const FACTOR_LABELS = {
@@ -16,6 +17,7 @@
         'open_interest': '持仓量',
         'long_short_ratio': '多空比',
         'options': '期权数据',
+        'nofx_signal': 'NOFX交叉验证',
         'macro': '宏观环境',
         'sentiment': '市场情绪'
     };

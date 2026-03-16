@@ -1,13 +1,17 @@
 """期权数据评分因子。
 
 评估维度：
-- Max Pain 与当前价格的距离和方向
+- Max Pain 与当前价格的距离和方向（按到期日加权）
 - Put/Call Ratio 极端值（反向指标）
 - IV Rank（波动率水平）
-- 临近到期权重放大
 
 期权市场以机构为主，是"聪明钱"的信号。
+到期前 7 天 Max Pain 磁吸效应最强，距到期越远权重越低。
 """
+
+from __future__ import annotations
+
+from datetime import datetime
 
 from core.constants import Direction, FactorName
 from core.interfaces import ScoreFactor
@@ -43,30 +47,27 @@ class OptionsFactor(ScoreFactor):
         details_parts: list[str] = []
         price = snapshot.price.current
 
-        # ── Max Pain 方向评分（±10 分）──
-        # 当前价低于 Max Pain → 可能被拉上去（看多）
-        # 当前价高于 Max Pain → 可能被拉下来（看空）
+        # ── Max Pain 方向评分（±10 分，按到期日加权）──
         if price > 0 and opts.max_pain:
             distance_pct = ((price - opts.max_pain) / price) * 100
+            # 到期日权重：7 天内 1.0，14 天 0.6，21 天 0.3，>30 天 0.15
+            expiry_weight = _expiry_weight(opts.nearest_expiry)
+            raw_mp = 0
             if distance_pct > 3:
-                score -= 10
-                details_parts.append(
-                    f"当前价高于MaxPain({opts.max_pain:.0f}){distance_pct:.1f}%,到期前可能回调"
-                )
+                raw_mp = -10
             elif distance_pct > 1:
-                score -= 5
-                details_parts.append(
-                    f"当前价略高于MaxPain({opts.max_pain:.0f}){distance_pct:.1f}%"
-                )
+                raw_mp = -5
             elif distance_pct < -3:
-                score += 10
-                details_parts.append(
-                    f"当前价低于MaxPain({opts.max_pain:.0f}){abs(distance_pct):.1f}%,到期前可能上涨"
-                )
+                raw_mp = 10
             elif distance_pct < -1:
-                score += 5
+                raw_mp = 5
+
+            mp_score = round(raw_mp * expiry_weight)
+            score += mp_score
+            exp_label = f"权重{expiry_weight:.0%}" if expiry_weight < 1.0 else "到期临近"
+            if raw_mp != 0:
                 details_parts.append(
-                    f"当前价略低于MaxPain({opts.max_pain:.0f}){abs(distance_pct):.1f}%"
+                    f"MaxPain={opts.max_pain:.0f},距{distance_pct:+.1f}%,{exp_label}({mp_score:+d})"
                 )
             else:
                 details_parts.append(f"当前价接近MaxPain({opts.max_pain:.0f})")
@@ -105,3 +106,23 @@ class OptionsFactor(ScoreFactor):
             direction=direction,
             details="; ".join(details_parts),
         )
+
+
+def _expiry_weight(nearest_expiry: str) -> float:
+    """按距到期日天数计算 Max Pain 权重（到期越近越强）。"""
+    if not nearest_expiry:
+        return 0.5
+    try:
+        exp_date = datetime.strptime(nearest_expiry[:10], "%Y-%m-%d")
+        days = (exp_date - datetime.utcnow()).days
+        if days <= 0:
+            return 1.0
+        if days <= 7:
+            return 1.0
+        if days <= 14:
+            return 0.6
+        if days <= 21:
+            return 0.3
+        return 0.15
+    except (ValueError, TypeError):
+        return 0.5

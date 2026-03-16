@@ -42,38 +42,30 @@ class MacroFactor(ScoreFactor):
         score = 0.0
         details_parts: list[str] = []
 
-        # ── 纳斯达克走势（±4 分，正相关）──
+        # ── 美股走势（±5 分，纳指/标普取信号较强者，避免高相关双重计分）──
         nq = macro.nasdaq_change_pct
-        if nq > 1.0:
-            score += 4
-            details_parts.append(f"纳指+{nq:.1f}%(利好)")
-        elif nq > 0.3:
-            score += 2
-            details_parts.append(f"纳指+{nq:.1f}%(偏好)")
-        elif nq < -1.0:
-            score -= 4
-            details_parts.append(f"纳指{nq:.1f}%(利空)")
-        elif nq < -0.3:
-            score -= 2
-            details_parts.append(f"纳指{nq:.1f}%(偏空)")
-        else:
-            details_parts.append(f"纳指{nq:+.1f}%(中性)")
+        sp = macro.sp500_change_pct or 0.0
 
-        # ── 标普 500 走势（±4 分，正相关，与纳指互补） ──
-        sp = macro.sp500_change_pct
-        if sp is not None and sp != 0:
-            if sp > 1.0:
-                score += 4
-                details_parts.append(f"标普+{sp:.1f}%(利好)")
-            elif sp > 0.3:
-                score += 2
-                details_parts.append(f"标普+{sp:.1f}%(偏好)")
-            elif sp < -1.0:
-                score -= 4
-                details_parts.append(f"标普{sp:.1f}%(利空)")
-            elif sp < -0.3:
-                score -= 2
-                details_parts.append(f"标普{sp:.1f}%(偏空)")
+        def _us_equity_score(pct: float) -> int:
+            if pct > 1.5:
+                return 5
+            if pct > 1.0:
+                return 4
+            if pct > 0.3:
+                return 2
+            if pct < -1.5:
+                return -5
+            if pct < -1.0:
+                return -4
+            if pct < -0.3:
+                return -2
+            return 0
+
+        nq_s, sp_s = _us_equity_score(nq), _us_equity_score(sp)
+        # 取绝对值更大的那个（信号更强）
+        us_score = nq_s if abs(nq_s) >= abs(sp_s) else sp_s
+        score += us_score
+        details_parts.append(f"纳指{nq:+.1f}%/标普{sp:+.1f}% → 美股{us_score:+d}")
 
         # ── DXY 美元指数（±5 分，反相关）──
         dxy = macro.dxy_change_pct

@@ -48,6 +48,7 @@
                 ('options', '期权数据', config.scoring.options),
                 ('macro', '宏观环境', config.scoring.macro),
                 ('sentiment', '情绪指标', config.scoring.sentiment),
+                ('nofx_signal', 'NOFX 交叉验证', config.scoring.nofx_signal),
             ] %}
             {% for key, label, factor in factors %}
             <div class="factor-config">
@@ -169,6 +170,35 @@
                 <label>Base URL</label>
                 <input type="text" name="ai.base_url" value="{{ config.ai.base_url }}" class="input">
             </div>
+        </div>
+
+        <!-- ═══ NOFX 外部数据源 ═══ -->
+        <div class="card">
+            <h3 class="card-title">📡 NOFX 外部数据源</h3>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="nofx.enabled" {{ 'checked' if config.nofx.enabled }}>
+                    启用 NOFX 数据源（AI300 信号、资金净流、订单簿热力图、社区热度）
+                </label>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" name="nofx.api_key" value="{{ config.nofx.api_key }}" class="input" placeholder="在 nofxos.ai 获取">
+                </div>
+                <div class="form-group">
+                    <label>Base URL</label>
+                    <input type="text" name="nofx.base_url" value="{{ config.nofx.base_url }}" class="input">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>数据缓存 TTL（秒）</label>
+                <input type="number" name="nofx.cache_ttl" value="{{ config.nofx.cache_ttl }}" class="input" min="60" max="1800" style="max-width:200px">
+            </div>
+            <p class="price-meta" style="margin-top:8px">
+                启用后将新增 NOFX 交叉验证评分因子（±10 分），覆盖 AI300 量化信号、机构资金流向、订单簿深度 Delta。
+                数据不可用时自动降级为 0 分，不影响原有评分。
+            </p>
         </div>
 
         <!-- ═══ 执行层配置（重构后）═══ -->

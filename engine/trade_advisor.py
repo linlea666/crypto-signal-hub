@@ -26,6 +26,8 @@ from core.models import (
     TradeSuggestion,
 )
 
+BREAKOUT_BUFFER_PCT = 0.008  # 0.8% — 突破/跌破 buffer（比 0.5% 更宽，减少假突破）
+
 
 # ══════════════════════════════════════
 # 公开接口
@@ -255,9 +257,8 @@ def _build_breakout_long(
     if not resistances:
         return None
 
-    # 找最近的强阻力作为突破目标
     target_level = resistances[0]
-    trigger = target_level.price * 1.005  # 阻力上方 0.5% buffer
+    trigger = target_level.price * (1 + BREAKOUT_BUFFER_PCT)
 
     # 止损 = 突破阻力位本身（突破后变支撑）
     stop_loss = target_level.price * 0.99
@@ -281,7 +282,7 @@ def _build_breakout_long(
         label="突破追多",
         trigger_price=round(trigger, 2),
         entry_low=round(trigger, 2),
-        entry_high=round(trigger * 1.005, 2),
+        entry_high=round(trigger * (1 + BREAKOUT_BUFFER_PCT / 2), 2),
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
@@ -304,7 +305,7 @@ def _build_breakout_short(
         return None
 
     target_level = supports[0]
-    trigger = target_level.price * 0.995  # 支撑下方 0.5% buffer
+    trigger = target_level.price * (1 - BREAKOUT_BUFFER_PCT)
 
     # 止损 = 支撑位本身（跌破后变阻力）
     stop_loss = target_level.price * 1.01
@@ -327,7 +328,7 @@ def _build_breakout_short(
         strategy_type="breakout_short",
         label="突破追空",
         trigger_price=round(trigger, 2),
-        entry_low=round(trigger * 0.995, 2),
+        entry_low=round(trigger * (1 - BREAKOUT_BUFFER_PCT / 2), 2),
         entry_high=round(trigger, 2),
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
@@ -385,11 +386,15 @@ def _find_next_level(
 def _find_tp_levels(
     levels: list[KeyLevel], current: float,
 ) -> tuple[float | None, float | None]:
-    """从关键位中取 2 个止盈目标。"""
+    """从关键位中取 2 个止盈目标，跳过方向不合理的价位。"""
     if not levels:
         return None, None
-    tp1 = levels[0].price
-    tp2 = levels[1].price if len(levels) >= 2 else None
+    # 过滤掉在当前价「错误侧」的关键位（由调用方保证传入正确的列表方向）
+    valid = [lv for lv in levels if abs(lv.price - current) / max(current, 1) > 0.002]
+    if not valid:
+        return None, None
+    tp1 = valid[0].price
+    tp2 = valid[1].price if len(valid) >= 2 else None
     return tp1, tp2
 
 
@@ -404,12 +409,20 @@ def _level_source_label(levels: list[KeyLevel], target_price: float) -> str:
 
 
 def _determine_position_size(risk_reward: float, confidence: float) -> PositionSize:
-    """根据盈亏比和信心度决定仓位大小。"""
+    """根据盈亏比和信心度连续计算仓位（软分级，消除硬边界）。
+
+    score = rr_factor * conf_factor, 映射到 LIGHT / NORMAL / HEAVY
+    """
     if risk_reward < MIN_RISK_REWARD_RATIO:
         return PositionSize.SKIP
-    if risk_reward >= 3.0 and confidence >= 75:
+
+    rr_factor = min(risk_reward / 2.0, 2.0)  # 1.5→0.75, 2.0→1.0, 3.0→1.5, 4.0→2.0
+    conf_factor = confidence / 70.0           # 60→0.86, 70→1.0, 80→1.14
+
+    composite = rr_factor * conf_factor       # 0.64 ~ 2.28+
+    if composite >= 1.8:
         return PositionSize.HEAVY
-    if risk_reward >= 2.0:
+    if composite >= 1.1:
         return PositionSize.NORMAL
     return PositionSize.LIGHT
 

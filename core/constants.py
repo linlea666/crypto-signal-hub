@@ -31,6 +31,7 @@ class FactorName(str, Enum):
     OPTIONS = "options"
     MACRO = "macro"
     SENTIMENT = "sentiment"
+    NOFX_SIGNAL = "nofx_signal"
 
 
 class MarketSession(str, Enum):
@@ -108,6 +109,7 @@ DEFAULT_FACTOR_WEIGHTS: dict[FactorName, float] = {
     FactorName.OPTIONS: 20.0,
     FactorName.MACRO: 20.0,
     FactorName.SENTIMENT: 15.0,
+    FactorName.NOFX_SIGNAL: 10.0,
 }
 
 # 信心度阈值
