@@ -52,6 +52,18 @@ class SignalScorer:
         self._factors.append(factor)
         logger.info("注册评分因子: %s (满分 ±%.0f)", factor.name, factor.max_score)
 
+    def unregister_factor(self, name: str) -> bool:
+        """按名称移除因子，返回是否成功移除。"""
+        before = len(self._factors)
+        self._factors = [f for f in self._factors if f.name != name]
+        removed = len(self._factors) < before
+        if removed:
+            logger.info("注销评分因子: %s", name)
+        return removed
+
+    def has_factor(self, name: str) -> bool:
+        return any(f.name == name for f in self._factors)
+
     def evaluate(
         self,
         snapshot: MarketSnapshot,

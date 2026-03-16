@@ -107,6 +107,18 @@ class JobScheduler:
             self._executor._config = config.executor
             logger.info("执行层配置已更新")
 
+        # NOFX 评分因子动态启停
+        from core.constants import FactorName
+        nofx_want = config.scoring.nofx_signal.enabled
+        nofx_has = self._scorer.has_factor(FactorName.NOFX_SIGNAL)
+        if nofx_want and not nofx_has:
+            from engine.factors.nofx_signal import NofxSignalFactor
+            self._scorer.register_factor(
+                NofxSignalFactor(max_score_val=config.scoring.nofx_signal.weight)
+            )
+        elif not nofx_want and nofx_has:
+            self._scorer.unregister_factor(FactorName.NOFX_SIGNAL)
+
         logger.info("调度器配置已热重载")
 
     def setup(self) -> None:

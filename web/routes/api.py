@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -150,6 +151,10 @@ async def save_config(request: Request):
     try:
         cm.update(**body)
         _reload_all_services(request.app)
+        # 异步刷新健康检查，让大屏即时反映新配置状态
+        checker = request.app.state.health_checker
+        if checker:
+            asyncio.ensure_future(checker.check_all())
         return {"success": True}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
@@ -176,6 +181,17 @@ def _reload_all_services(app) -> None:
     scheduler = app.state.job_scheduler
     if scheduler:
         scheduler.reload_config(config)
+
+    # NOFX 采集器动态启停
+    registry = app.state.collector_registry
+    if registry:
+        nofx_want = config.nofx.enabled and bool(config.nofx.api_key)
+        nofx_has = registry.has("nofx")
+        if nofx_want and not nofx_has:
+            from collectors.nofx import NofxCollector
+            registry.register(NofxCollector(config.nofx))
+        elif not nofx_want and nofx_has:
+            registry.unregister("nofx")
 
     health_checker = app.state.health_checker
     if health_checker:

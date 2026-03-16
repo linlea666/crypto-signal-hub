@@ -426,7 +426,9 @@
             </div>
             <div class="metric-item">
                 <div class="metric-label">BTC ETF流向</div>
-                <div class="metric-value" style="font-size:12px">{{ macro.get('btc_etf_flow_3d_trend', '--') }}</div>
+                {% set etf_raw = macro.get('btc_etf_flow_3d_trend', 'unknown') %}
+                {% set ETF_CN = {"inflow": "净流入", "outflow": "净流出", "mixed": "双向波动", "unknown": "暂无数据源"} %}
+                <div class="metric-value" style="font-size:12px">{{ ETF_CN.get(etf_raw, etf_raw) }}</div>
             </div>
         </div>
     </div>

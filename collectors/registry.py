@@ -39,6 +39,19 @@ class CollectorRegistry:
         }
         logger.info("注册采集器: %s", collector.name)
 
+    def unregister(self, name: str) -> bool:
+        """按名称移除采集器，返回是否成功移除。"""
+        before = len(self._collectors)
+        self._collectors = [c for c in self._collectors if c.name != name]
+        self._status.pop(name, None)
+        removed = len(self._collectors) < before
+        if removed:
+            logger.info("注销采集器: %s", name)
+        return removed
+
+    def has(self, name: str) -> bool:
+        return any(c.name == name for c in self._collectors)
+
     @property
     def status(self) -> dict[str, dict]:
         return dict(self._status)
