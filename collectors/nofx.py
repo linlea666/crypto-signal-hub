@@ -76,7 +76,16 @@ class NofxCollector(DataCollector):
                 body = resp.json()
                 if isinstance(body, list):
                     return body
-                return body.get("data", body.get("list", []))
+                # API 返回 {"success":true,"data":{"heatmaps":[...]}} 嵌套结构
+                data = body.get("data", body.get("list", []))
+                if isinstance(data, list):
+                    return data
+                # data 是 dict 时，取第一个包含列表的值
+                if isinstance(data, dict):
+                    for v in data.values():
+                        if isinstance(v, list):
+                            return v
+                return []
         except Exception as e:
             logger.warning("NOFX API %s 请求失败: %s", path, e)
             return []
@@ -125,8 +134,8 @@ def _build_nofx_data(
     large_asks: list[float] = []
     hm_item = _find_coin(heatmap, coin)
     if hm_item:
-        bid_total = float(hm_item.get("bidTotal", hm_item.get("bid_total", 0)) or 0)
-        ask_total = float(hm_item.get("askTotal", hm_item.get("ask_total", 0)) or 0)
+        bid_total = float(hm_item.get("bid_volume", hm_item.get("bidTotal", hm_item.get("bid_total", 0))) or 0)
+        ask_total = float(hm_item.get("ask_volume", hm_item.get("askTotal", hm_item.get("ask_total", 0))) or 0)
         delta = float(hm_item.get("delta", 0) or 0)
         for b in (hm_item.get("largeBids") or hm_item.get("large_bids") or [])[:5]:
             if isinstance(b, (int, float)):

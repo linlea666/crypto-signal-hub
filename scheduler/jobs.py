@@ -641,10 +641,14 @@ class JobScheduler:
                 if is_actionable:
                     await self._dispatcher.dispatch(report)
                 else:
+                    threshold = self._config.general.actionable_min_confidence
+                    if report.confidence < threshold:
+                        reason = f"信心度{report.confidence:.0f}% < 门槛{threshold:.0f}%"
+                    else:
+                        reason = "所有策略盈亏比不足"
                     logger.info(
-                        "观察信号 %s 跳过推送 (信心度=%.0f%% < 门槛%.0f%%)",
-                        report.id[:8], report.confidence,
-                        self._config.general.actionable_min_confidence,
+                        "观察信号 %s 跳过推送 (%s)",
+                        report.id[:8], reason,
                     )
             else:
                 report_dict["_report_obj"] = report
