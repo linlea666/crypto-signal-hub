@@ -16,6 +16,7 @@ from core.constants import (
     Direction,
     FactorName,
     FundingRateLevel,
+    MarketState,
     OIPriceSignal,
     PositionSize,
     SignalStrength,
@@ -273,6 +274,8 @@ class SignalReport:
     trade_suggestion: TradeSuggestion | None = None  # 旧版兼容，渐进弃用
     trade_plan: TradePlan | None = None              # 新版条件策略计划
     alert_type: AlertType = AlertType.HOURLY_REPORT
+    market_state: MarketState = MarketState.RANGING
+    trigger_reason: str = ""                         # 哨兵触发原因（空=定时分析）
 
     @property
     def score_display(self) -> str:

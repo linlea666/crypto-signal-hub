@@ -43,6 +43,10 @@
 {% set trade_plan = (report.get('trade_plan') if report else none) %}
 {% set has_data = report is not none %}
 {% set report_time = report.get('timestamp', '')[:16] if report else '' %}
+{% set market_state = report.get('market_state', 'ranging') if report else 'ranging' %}
+{% set market_state_label = report.get('market_state_label', '震荡') if report else '震荡' %}
+{% set trigger_reason = report.get('trigger_reason', '') if report else '' %}
+{% set STATE_CSS = {"strong_trend": "state-trend", "ranging": "state-ranging", "extreme_divergence": "state-extreme"} %}
 
 {# 时间戳宏：面板标题右侧显示分析时间 #}
 {% macro panel_time() %}
@@ -81,16 +85,17 @@
         {% endif %}
     </div>
 
-    <!-- 信号强度 -->
+    <!-- 信号强度 + 市场状态 -->
     <div class="strip-card" style="text-align:center">
         <div class="strip-label">信号 / 信心度</div>
         {% if has_data %}
         {% set strength = report.get('signal_strength', 'weak') %}
         {% set strength_cn = {'strong':'强信号','moderate':'中等','weak':'弱信号'} %}
-        <div class="signal-badge {{ strength }}" style="margin:6px 0">{{ strength_cn.get(strength, strength) }}</div>
+        <div class="signal-badge {{ strength }}" style="margin:4px 0">{{ strength_cn.get(strength, strength) }}</div>
         <div class="strip-value mono" style="font-size:22px">{{ "%.0f"|format(report.get('confidence', 0)) }}%</div>
+        <div class="market-state-badge {{ STATE_CSS.get(market_state, 'state-ranging') }}" style="margin-top:4px">{{ market_state_label }}</div>
         {% else %}
-        <div class="signal-badge weak" style="margin:6px 0">--</div>
+        <div class="signal-badge weak" style="margin:4px 0">--</div>
         <div class="strip-value mono dim" style="font-size:22px">--%</div>
         {% endif %}
     </div>
@@ -236,7 +241,12 @@
 <!-- ═══ Row 2.5: 条件挂单策略 ═══ -->
 <div class="trade-suggestion-strip">
     <div class="card card-sm">
-        <div class="card-title">条件挂单策略（小亏大赚） {{ panel_time() }}</div>
+        <div class="card-title">
+            条件挂单策略（小亏大赚） {{ panel_time() }}
+            {% if trigger_reason %}
+            <span class="trigger-reason-badge">🚨 {{ trigger_reason }}</span>
+            {% endif %}
+        </div>
         {% if trade_plan and trade_plan.get('strategies') %}
         {# 即时建议 #}
         <div class="trade-immediate">

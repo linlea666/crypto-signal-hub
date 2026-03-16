@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from core.constants import Direction, MIN_RISK_REWARD_RATIO, PositionSize
+from core.constants import Direction, MarketState, MIN_RISK_REWARD_RATIO, PositionSize
 from core.models import (
     ConditionalStrategy,
     KeyLevel,
@@ -36,10 +36,16 @@ def derive_trade_plan(
     confidence: float,
     price: PriceData,
     levels: KeyLevels,
+    *,
+    market_state: MarketState = MarketState.RANGING,
+    strategy_mode: str = "adaptive",
 ) -> TradePlan:
     """始终生成包含多个条件策略的交易计划。
 
-    即使方向中性，也会提供"如果到达 X 则做 Y"的挂单策略。
+    根据 market_state 和 strategy_mode 对策略类型进行约束：
+    - strong_trend / trend_only：只保留顺势策略
+    - ranging：双向策略，逆势标注高风险
+    - extreme_divergence：允许逆势但降仓位到 LIGHT
     """
     current = price.current
     if current <= 0:
@@ -67,6 +73,11 @@ def derive_trade_plan(
     if breakout_short:
         strategies.append(breakout_short)
 
+    # 根据市场状态过滤/约束策略
+    strategies = _apply_state_constraints(
+        strategies, direction, market_state, strategy_mode,
+    )
+
     # 按 market_bias 排序：偏向方向的策略排前面
     strategies = _sort_by_bias(strategies, direction)
 
@@ -77,7 +88,7 @@ def derive_trade_plan(
     immediate = _derive_immediate_action(direction, confidence, strategies)
 
     # 总体说明
-    note = _derive_analysis_note(direction, confidence, levels)
+    note = _derive_analysis_note(direction, confidence, levels, market_state)
 
     return TradePlan(
         market_bias=direction,
@@ -403,6 +414,80 @@ def _determine_position_size(risk_reward: float, confidence: float) -> PositionS
     return PositionSize.LIGHT
 
 
+def _apply_state_constraints(
+    strategies: list[ConditionalStrategy],
+    direction: Direction,
+    market_state: MarketState,
+    strategy_mode: str,
+) -> list[ConditionalStrategy]:
+    """根据市场状态和用户策略模式过滤/修改策略。"""
+    force_trend_only = (
+        strategy_mode == "trend_only"
+        or market_state == MarketState.STRONG_TREND
+    )
+
+    if direction == Direction.NEUTRAL:
+        return strategies
+
+    is_bullish = direction == Direction.BULLISH
+    long_types = {"pullback_long", "breakout_long"}
+    short_types = {"bounce_short", "breakout_short"}
+    trend_types = long_types if is_bullish else short_types
+    counter_types = short_types if is_bullish else long_types
+
+    if force_trend_only:
+        return [s for s in strategies if s.strategy_type in trend_types]
+
+    if market_state == MarketState.EXTREME_DIVERGENCE:
+        result = []
+        for s in strategies:
+            if s.strategy_type in counter_types:
+                if s.position_size not in (PositionSize.SKIP, PositionSize.LIGHT):
+                    s = ConditionalStrategy(
+                        strategy_type=s.strategy_type,
+                        label=s.label + "⚠️逆势轻仓",
+                        trigger_price=s.trigger_price,
+                        entry_low=s.entry_low,
+                        entry_high=s.entry_high,
+                        stop_loss=s.stop_loss,
+                        take_profit_1=s.take_profit_1,
+                        take_profit_2=s.take_profit_2,
+                        risk_reward=s.risk_reward,
+                        position_size=PositionSize.LIGHT,
+                        sl_source=s.sl_source,
+                        tp1_source=s.tp1_source,
+                        reasoning=s.reasoning + "（极端背离，限轻仓）",
+                        valid_hours=s.valid_hours,
+                        invalidation=s.invalidation,
+                    )
+            result.append(s)
+        return result
+
+    # ranging: 保留全部，逆势策略标注高风险
+    result = []
+    for s in strategies:
+        if s.strategy_type in counter_types:
+            s = ConditionalStrategy(
+                strategy_type=s.strategy_type,
+                label=s.label + "⚠️逆势",
+                trigger_price=s.trigger_price,
+                entry_low=s.entry_low,
+                entry_high=s.entry_high,
+                stop_loss=s.stop_loss,
+                take_profit_1=s.take_profit_1,
+                take_profit_2=s.take_profit_2,
+                risk_reward=s.risk_reward,
+                position_size=s.position_size,
+                sl_source=s.sl_source,
+                tp1_source=s.tp1_source,
+                reasoning=s.reasoning,
+                valid_hours=s.valid_hours,
+                invalidation=s.invalidation,
+            )
+        result.append(s)
+    return result
+
+
 def _sort_by_bias(
     strategies: list[ConditionalStrategy], bias: Direction,
 ) -> list[ConditionalStrategy]:
@@ -442,9 +527,15 @@ def _derive_immediate_action(
 
 def _derive_analysis_note(
     direction: Direction, confidence: float, levels: KeyLevels,
+    market_state: MarketState = MarketState.RANGING,
 ) -> str:
     """生成策略总体说明。"""
-    parts = []
+    state_labels = {
+        MarketState.STRONG_TREND: "强趋势",
+        MarketState.RANGING: "震荡",
+        MarketState.EXTREME_DIVERGENCE: "极端背离",
+    }
+    parts = [f"市场状态：{state_labels.get(market_state, '未知')}"]
 
     if direction == Direction.NEUTRAL:
         parts.append("多空信号矛盾，以条件挂单代替主观判断")

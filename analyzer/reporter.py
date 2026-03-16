@@ -139,11 +139,21 @@ class AIReporter(AIProvider):
 
 def build_score_summary(report) -> str:
     """将评分结果格式化为 AI 可理解的摘要文本"""
+    state_labels = {
+        "strong_trend": "强趋势", "ranging": "震荡",
+        "extreme_divergence": "极端背离",
+    }
+    ms = getattr(report, "market_state", None)
+    ms_label = state_labels.get(ms.value, ms.value) if ms else "未分类"
+    trigger = getattr(report, "trigger_reason", "") or "定时分析"
+
     lines = [
         f"总分：{report.total_score:+.0f}/{report.max_possible_score:.0f}",
         f"方向：{report.direction_label}",
         f"信心度：{report.confidence:.0f}%",
         f"信号强度：{report.signal_strength.value}",
+        f"市场状态：{ms_label}",
+        f"触发原因：{trigger}",
         "",
         "各维度评分：",
     ]

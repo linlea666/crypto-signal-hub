@@ -204,7 +204,7 @@ def main():
 
     @app.on_event("shutdown")
     async def on_shutdown():
-        job_scheduler.stop()
+        await job_scheduler.stop()
         await collector_registry.cleanup_all()
         logger.info("系统已安全关闭")
 

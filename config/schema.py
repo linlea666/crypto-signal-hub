@@ -89,6 +89,43 @@ class AIConfig(BaseModel):
     temperature: float = 0.3
 
 
+class SentinelConfig(BaseModel):
+    """哨兵监控配置"""
+    enabled: bool = Field(default=True, description="是否启用哨兵实时监控")
+    price_check_interval: int = Field(
+        default=45, ge=10, le=300,
+        description="价格检查间隔（秒）"
+    )
+    derivatives_check_interval: int = Field(
+        default=300, ge=60, le=900,
+        description="OI/资金费率检查间隔（秒）"
+    )
+    breakout_buffer_pct: float = Field(
+        default=0.2, ge=0.05, le=1.0,
+        description="突破判定缓冲（价格超过关键位 X% 才算突破）"
+    )
+    rapid_move_pct: float = Field(
+        default=2.0, ge=0.5, le=10.0,
+        description="短时大幅波动阈值（15 分钟内涨跌超 X%）"
+    )
+    oi_change_threshold_pct: float = Field(
+        default=10.0, ge=3.0, le=30.0,
+        description="OI 异动阈值（变化超 X%）"
+    )
+    funding_extreme_rate: float = Field(
+        default=0.001, ge=0.0003, le=0.01,
+        description="资金费率极端阈值（绝对值）"
+    )
+    cooldown_minutes: int = Field(
+        default=30, ge=5, le=120,
+        description="两次事件触发分析的最小间隔（分钟）"
+    )
+    level_cooldown_minutes: int = Field(
+        default=60, ge=15, le=240,
+        description="同一关键位重复触发的冷却时间（分钟）"
+    )
+
+
 class GeneralConfig(BaseModel):
     """通用配置"""
     symbols: list[str] = Field(
@@ -97,8 +134,12 @@ class GeneralConfig(BaseModel):
     )
     timezone: str = "Asia/Shanghai"
     analysis_interval_minutes: int = Field(
-        default=60, ge=5, le=1440,
-        description="分析周期（分钟）"
+        default=240, ge=5, le=1440,
+        description="全量分析周期（分钟），哨兵启用时建议 240"
+    )
+    strategy_mode: str = Field(
+        default="adaptive",
+        description="策略模式: adaptive(三档自适应) / trend_only(只顺势)"
     )
 
 
@@ -110,5 +151,6 @@ class AppConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
+    sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     # 标记是否完成过首次引导
     setup_completed: bool = False

@@ -209,6 +209,8 @@ def _default_render(report: SignalReport) -> str:
             trade_plan=trade_plan_ctx,
             ai_analysis=report.ai_analysis or "",
             timestamp=report.timestamp.strftime("%Y-%m-%d %H:%M"),
+            market_state=report.market_state.value,
+            trigger_reason=report.trigger_reason or "",
         )
     except Exception as e:
         logger.error("邮件模板渲染失败，使用简单格式: %s", e)

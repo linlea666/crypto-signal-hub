@@ -65,6 +65,17 @@ class AlertType(str, Enum):
     STRONG_SIGNAL = "strong_signal"
     EVENT_WARNING = "event_warning"
     ANOMALY = "anomaly"
+    BREAKOUT = "breakout"              # 哨兵：价格突破/跌破关键位
+    OI_ANOMALY = "oi_anomaly"          # 哨兵：OI 异动
+    FUNDING_EXTREME = "funding_extreme"  # 哨兵：资金费率极端
+    RAPID_MOVE = "rapid_move"          # 哨兵：短时大幅波动
+
+
+class MarketState(str, Enum):
+    """市场状态，决定策略生成约束"""
+    STRONG_TREND = "strong_trend"            # 强趋势：只生成顺势策略
+    RANGING = "ranging"                      # 震荡/弱趋势：双向策略，标注风险
+    EXTREME_DIVERGENCE = "extreme_divergence"  # 极端背离：允许逆势但限轻仓
 
 
 class TradeOutcome(str, Enum):
@@ -110,6 +121,6 @@ US_PRE_MARKET_ET = (4, 0)     # 04:00 ET
 US_AFTER_HOURS_END_ET = (20, 0)  # 20:00 ET
 
 # 版本号
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 APP_NAME = "CryptoSignal Hub"
 DEFAULT_PORT = 8686

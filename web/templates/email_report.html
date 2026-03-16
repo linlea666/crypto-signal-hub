@@ -38,12 +38,25 @@
     </table>
   </td></tr>
 
-  <!-- Signal Strength Badge -->
+  <!-- Signal Strength Badge + Market State -->
   <tr><td style="padding:16px 30px">
     {% set badge_color = '#ef4444' if signal_strength == 'strong' else ('#f59e0b' if signal_strength == 'moderate' else '#64748b') %}
     <div style="display:inline-block;padding:6px 16px;border-radius:20px;background:{{ badge_color }}20;border:1px solid {{ badge_color }};color:{{ badge_color }};font-size:12px;font-weight:600">
       {{ signal_strength|upper }} SIGNAL
     </div>
+    {% if market_state %}
+    {% set state_colors = {"strong_trend": "#10b981", "ranging": "#94a3b8", "extreme_divergence": "#f59e0b"} %}
+    {% set state_labels = {"strong_trend": "强趋势", "ranging": "震荡", "extreme_divergence": "极端背离"} %}
+    {% set sc = state_colors.get(market_state, '#94a3b8') %}
+    <div style="display:inline-block;padding:6px 14px;border-radius:20px;background:{{ sc }}20;border:1px solid {{ sc }};color:{{ sc }};font-size:12px;font-weight:600;margin-left:8px">
+      {{ state_labels.get(market_state, market_state) }}
+    </div>
+    {% endif %}
+    {% if trigger_reason %}
+    <div style="margin-top:8px;font-size:12px;padding:6px 12px;border-radius:6px;background:#ef444415;color:#ef4444;border:1px solid #ef444430">
+      🚨 {{ trigger_reason }}
+    </div>
+    {% endif %}
   </td></tr>
 
   <!-- Divider -->

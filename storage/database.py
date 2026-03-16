@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS signal_reports (
     scores_json TEXT NOT NULL,
     levels_json TEXT NOT NULL,
     suggestion_json TEXT DEFAULT '',
+    market_state TEXT DEFAULT 'ranging',
+    trigger_reason TEXT DEFAULT '',
     email_sent INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -72,7 +74,26 @@ class Database:
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA_SQL)
+            self._migrate(conn)
             logger.info("数据库初始化完成: %s", self._path)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """增量迁移：为旧数据库添加新列（已存在则忽略）。"""
+        existing = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(signal_reports)").fetchall()
+        }
+        migrations = [
+            ("market_state", "TEXT DEFAULT 'ranging'"),
+            ("trigger_reason", "TEXT DEFAULT ''"),
+        ]
+        for col, typedef in migrations:
+            if col not in existing:
+                conn.execute(
+                    f"ALTER TABLE signal_reports ADD COLUMN {col} {typedef}"
+                )
+                logger.info("数据库迁移: 添加列 %s", col)
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection, None, None]:
@@ -96,8 +117,9 @@ class Database:
                 """INSERT OR REPLACE INTO signal_reports
                    (id, timestamp, symbol, total_score, max_score, direction,
                     confidence, signal_strength, alert_type, ai_analysis,
-                    snapshot_json, scores_json, levels_json, suggestion_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    snapshot_json, scores_json, levels_json, suggestion_json,
+                    market_state, trigger_reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     report_data["id"],
                     report_data["timestamp"],
@@ -116,6 +138,8 @@ class Database:
                         self._build_suggestion_json(report_data),
                         ensure_ascii=False,
                     ),
+                    report_data.get("market_state", "ranging"),
+                    report_data.get("trigger_reason", ""),
                 ),
             )
 

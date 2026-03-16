@@ -15,6 +15,7 @@ from core.constants import (
     CONFIDENCE_MODERATE_THRESHOLD,
     CONFIDENCE_STRONG_THRESHOLD,
     Direction,
+    MarketState,
     SignalStrength,
 )
 from core.interfaces import ScoreFactor
@@ -26,6 +27,7 @@ from core.models import (
 )
 from engine.confidence import calculate_confidence
 from engine.levels import identify_key_levels
+from engine.market_state import classify_from_snapshot
 from engine.trade_advisor import derive_trade_plan, derive_trade_suggestion
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,12 @@ class SignalScorer:
         self._factors.append(factor)
         logger.info("注册评分因子: %s (满分 ±%.0f)", factor.name, factor.max_score)
 
-    def evaluate(self, snapshot: MarketSnapshot) -> SignalReport:
+    def evaluate(
+        self,
+        snapshot: MarketSnapshot,
+        *,
+        strategy_mode: str = "adaptive",
+    ) -> SignalReport:
         """执行完整评分流程，生成信号报告。"""
         # 1. 逐因子评分
         factor_scores = self._calculate_all_factors(snapshot)
@@ -71,15 +78,20 @@ class SignalScorer:
         # 6. 识别关键价位
         key_levels = identify_key_levels(snapshot)
 
-        # 7. 推导条件策略计划（始终生成，即使方向中性）
+        # 7. 市场状态分类
+        market_state = classify_from_snapshot(total_score, confidence, snapshot)
+
+        # 8. 推导条件策略计划（受市场状态约束）
         trade_plan = derive_trade_plan(
             direction=direction,
             confidence=confidence,
             price=snapshot.price,
             levels=key_levels,
+            market_state=market_state,
+            strategy_mode=strategy_mode,
         )
 
-        # 旧版兼容：从已计算的 plan 中提取最优策略，避免重复计算
+        # 旧版兼容
         trade_suggestion = derive_trade_suggestion(
             direction=direction,
             confidence=confidence,
@@ -102,6 +114,7 @@ class SignalScorer:
             key_levels=key_levels,
             trade_suggestion=trade_suggestion,
             trade_plan=trade_plan,
+            market_state=market_state,
         )
 
     def _calculate_all_factors(

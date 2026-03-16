@@ -25,8 +25,9 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config.schema import AppConfig
-from core.constants import AlertType, SignalStrength
+from core.constants import AlertType, MarketState, SignalStrength
 from core.models import SignalReport
+from scheduler.sentinel import SentinelMonitor
 
 if TYPE_CHECKING:
     from analyzer.reporter import AIReporter
@@ -59,6 +60,11 @@ class JobScheduler:
         self._scheduler = AsyncIOScheduler()
         # 最新报告缓存（供 Web 大屏读取）
         self._latest_reports: dict[str, dict] = {}
+        # 哨兵监控器
+        self._sentinel = SentinelMonitor(
+            config=config,
+            on_trigger=self._on_sentinel_trigger,
+        )
 
     @property
     def latest_reports(self) -> dict[str, dict]:
@@ -156,11 +162,17 @@ class JobScheduler:
 
     def start(self) -> None:
         self._scheduler.start()
+        asyncio.create_task(self._sentinel.start())
         logger.info("调度器已启动")
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
+        await self._sentinel.stop()
         logger.info("调度器已停止")
+
+    @property
+    def sentinel(self) -> SentinelMonitor:
+        return self._sentinel
 
     async def run_now(self, symbol: str | None = None) -> dict | None:
         """手动立即执行一次分析（Web 界面的"立即分析"按钮）。
@@ -174,6 +186,20 @@ class JobScheduler:
                 sym, alert_type=AlertType.HOURLY_REPORT, force_ai=True,
             )
         return result
+
+    # ── 哨兵事件回调 ──
+
+    async def _on_sentinel_trigger(
+        self, symbol: str, reason: str, alert_type: AlertType,
+    ) -> None:
+        """哨兵检测到事件后触发的全量分析（始终调用 AI）。"""
+        logger.info("哨兵触发分析: %s — %s", symbol, reason)
+        await self._analyze_symbol(
+            symbol,
+            alert_type=alert_type,
+            force_ai=True,
+            trigger_reason=reason,
+        )
 
     # ── 定时任务实现 ──
 
@@ -232,7 +258,12 @@ class JobScheduler:
     async def _backtest_one_signal(
         self, exchange, signal: dict, window: str, hours_ago: int,
     ) -> None:
-        """对单条信号执行基于 K 线的回测。"""
+        """两阶段状态机回测：触发判定 → 盈亏判定。
+
+        阶段 1（条件单触发）：遍历 K 线检查 trigger_price 是否被触及
+        阶段 2（盈亏判定）：从触发点开始检查 SL/TP 命中
+        旧版信号（无 trade_plan）退化为直接进入阶段 2。
+        """
         symbol = signal["symbol"]
         direction = signal["direction"]
         snapshot = json.loads(signal.get("snapshot_json", "{}"))
@@ -240,7 +271,6 @@ class JobScheduler:
         if not entry_price:
             return
 
-        # 尝试从 suggestion_json 提取 SL/TP（交易建议保存在这里）
         suggestion = {}
         raw_sug = signal.get("suggestion_json", "")
         if raw_sug:
@@ -251,21 +281,6 @@ class JobScheduler:
             except (json.JSONDecodeError, TypeError):
                 suggestion = {}
 
-        stop_loss = suggestion.get("stop_loss", 0)
-        tp1 = suggestion.get("take_profit_1", 0)
-        tp2 = suggestion.get("take_profit_2", 0)
-
-        # 新版 TradePlan 降级：旧版字段为空时从 _plan.strategies 提取
-        if not stop_loss and "_plan" in suggestion:
-            strategies = suggestion["_plan"].get("strategies", [])
-            for strat in strategies:
-                if strat.get("position_size") not in (None, "skip"):
-                    stop_loss = strat.get("stop_loss", 0)
-                    tp1 = strat.get("take_profit_1", 0)
-                    tp2 = strat.get("take_profit_2", 0)
-                    break
-
-        # 获取信号发出后的 1h K 线（窗口期 = hours_ago 小时）
         since_ts = self._iso_to_ms(signal["timestamp"])
         if not since_ts:
             return
@@ -277,16 +292,28 @@ class JobScheduler:
             return
 
         last_candle = candles[-1]
-        current_price = last_candle[4]  # close
+        current_price = last_candle[4]
         change_pct = ((current_price - entry_price) / entry_price) * 100
 
-        # 有 SL/TP 时：逐 K 线检测命中
-        outcome = self._evaluate_candles(
-            direction, entry_price, stop_loss, tp1, tp2, candles,
-        )
+        # 尝试两阶段回测（基于 trade_plan 中的条件策略）
+        plan_strategies = self._extract_plan_strategies(suggestion)
+        outcome = "expired"
 
-        # 无交易建议时退化为方向判断
-        if outcome == "expired" and not stop_loss:
+        if plan_strategies:
+            outcome = self._evaluate_two_stage(direction, plan_strategies, candles)
+
+        # 退化路径：旧版 suggestion 的直接 SL/TP
+        if outcome == "expired":
+            sl = suggestion.get("stop_loss", 0)
+            tp1 = suggestion.get("take_profit_1", 0)
+            tp2 = suggestion.get("take_profit_2", 0)
+            if sl or tp1:
+                outcome = self._evaluate_candles_simple(
+                    direction, sl, tp1, tp2, candles,
+                )
+
+        # 无任何交易建议时退化为方向判断
+        if outcome == "expired" and not plan_strategies and not suggestion.get("stop_loss"):
             if direction == "bullish":
                 outcome = "correct_dir" if change_pct > 0 else "wrong_dir"
             elif direction == "bearish":
@@ -300,7 +327,8 @@ class JobScheduler:
         )
 
         outcome_symbol = {"tp1_hit": "🎯T1", "tp2_hit": "🎯T2", "sl_hit": "💔SL",
-                          "correct_dir": "✓", "wrong_dir": "✗", "expired": "⏳"}
+                          "correct_dir": "✓", "wrong_dir": "✗", "expired": "⏳",
+                          "not_triggered": "⏳未触发"}
         logger.info(
             "回测[%s] %s: %s %.0f→%.0f (%+.2f%%) %s",
             window, signal["id"][:8], direction,
@@ -309,26 +337,81 @@ class JobScheduler:
         )
 
     @staticmethod
-    def _evaluate_candles(
-        direction: str, entry: float,
+    def _extract_plan_strategies(suggestion: dict) -> list[dict]:
+        """从 suggestion_json 中提取 trade_plan 的策略列表。"""
+        plan = suggestion.get("_plan", {})
+        strategies = plan.get("strategies", [])
+        return [s for s in strategies if s.get("position_size") not in (None, "skip")]
+
+    @staticmethod
+    def _evaluate_two_stage(
+        direction: str,
+        strategies: list[dict],
+        candles: list,
+    ) -> str:
+        """两阶段状态机：先判定触发，再判定盈亏。
+
+        对每个可执行策略（position_size != skip）：
+        - 阶段 1：扫描 K 线，找到 trigger_price 被触及的 K 线索引
+        - 阶段 2：从触发 K 线开始，逐 K 线检查 SL/TP
+        取所有策略中最好的结果。
+        """
+        best_outcome = "expired"
+        priority = {"tp2_hit": 4, "tp1_hit": 3, "sl_hit": 1, "expired": 0}
+
+        for strat in strategies:
+            trigger = strat.get("trigger_price", 0)
+            sl = strat.get("stop_loss", 0)
+            tp1 = strat.get("take_profit_1", 0)
+            tp2 = strat.get("take_profit_2", 0)
+            stype = strat.get("strategy_type", "")
+
+            if not trigger:
+                continue
+
+            is_long = "long" in stype
+            triggered_idx = None
+
+            # 阶段 1：触发判定
+            for i, candle in enumerate(candles):
+                high, low = candle[2], candle[3]
+                if is_long and low <= trigger:
+                    triggered_idx = i
+                    break
+                if not is_long and high >= trigger:
+                    triggered_idx = i
+                    break
+
+            if triggered_idx is None:
+                continue
+
+            # 阶段 2：盈亏判定（从触发 K 线开始）
+            strat_dir = "bullish" if is_long else "bearish"
+            outcome = JobScheduler._evaluate_candles_simple(
+                strat_dir, sl, tp1, tp2, candles[triggered_idx:],
+            )
+
+            if priority.get(outcome, 0) > priority.get(best_outcome, 0):
+                best_outcome = outcome
+
+        return best_outcome
+
+    @staticmethod
+    def _evaluate_candles_simple(
+        direction: str,
         sl: float, tp1: float, tp2: float,
         candles: list,
     ) -> str:
         """逐 K 线遍历，判断先触达止损还是止盈。
 
         K 线格式: [timestamp, open, high, low, close, volume]
-        做多: low <= SL → sl_hit; high >= TP → tp_hit
-        做空: high >= SL → sl_hit; low <= TP → tp_hit
         """
         if not sl and not tp1:
             return "expired"
 
-        tp2_hit = False
         tp1_hit = False
-
         for candle in candles:
-            high = candle[2]
-            low = candle[3]
+            high, low = candle[2], candle[3]
 
             if direction == "bullish":
                 if sl and low <= sl:
@@ -345,9 +428,7 @@ class JobScheduler:
                 if tp1 and low <= tp1:
                     tp1_hit = True
 
-        if tp1_hit:
-            return "tp1_hit"
-        return "expired"
+        return "tp1_hit" if tp1_hit else "expired"
 
     @staticmethod
     def _iso_to_ms(iso_str: str) -> int | None:
@@ -395,24 +476,48 @@ class JobScheduler:
         alert_type: AlertType = AlertType.HOURLY_REPORT,
         skip_dispatch: bool = False,
         force_ai: bool = False,
+        trigger_reason: str = "",
     ) -> dict | None:
         """执行单个交易对的完整分析流程。
 
         Args:
             force_ai: 手动触发时为 True，强制调用 AI 不受信号强度限制
+            trigger_reason: 哨兵触发原因（空=定时分析）
         """
         try:
-            logger.info("开始分析: %s", symbol)
+            logger.info("开始分析: %s (trigger=%s)", symbol, trigger_reason or "scheduled")
 
             # 1. 采集数据
             snapshot = await self._registry.collect_snapshot(symbol)
 
-            # 2. 评分
-            report = self._scorer.evaluate(snapshot)
+            # 2. 评分（scorer 内部调用 market_state 分类）
+            report = self._scorer.evaluate(
+                snapshot,
+                strategy_mode=self._config.general.strategy_mode,
+            )
+
+            # 注入触发信息
+            report = SignalReport(
+                id=report.id,
+                timestamp=report.timestamp,
+                symbol=report.symbol,
+                snapshot=report.snapshot,
+                factor_scores=report.factor_scores,
+                total_score=report.total_score,
+                max_possible_score=report.max_possible_score,
+                direction=report.direction,
+                confidence=report.confidence,
+                signal_strength=report.signal_strength,
+                key_levels=report.key_levels,
+                trade_suggestion=report.trade_suggestion,
+                trade_plan=report.trade_plan,
+                ai_analysis=report.ai_analysis,
+                alert_type=alert_type,
+                market_state=report.market_state,
+                trigger_reason=trigger_reason,
+            )
 
             # 3. AI 分析
-            #    自动周期：仅中等以上信号调用（节省 Token）
-            #    手动触发 / 日报：始终调用
             should_call_ai = (
                 force_ai
                 or alert_type == AlertType.DAILY_REPORT
@@ -441,6 +546,8 @@ class JobScheduler:
                     trade_plan=report.trade_plan,
                     ai_analysis=ai_text,
                     alert_type=alert_type,
+                    market_state=report.market_state,
+                    trigger_reason=trigger_reason,
                 )
 
             # 4. 存储
@@ -448,16 +555,20 @@ class JobScheduler:
             self._db.save_report(report_dict)
             self._latest_reports[symbol] = report_dict
 
-            # 5. 通知分发（日报场景由调用方单独处理）
+            # 5. 更新哨兵缓存的关键位
+            self._sentinel.update_levels(symbol, report.key_levels)
+
+            # 6. 通知分发（日报场景由调用方单独处理）
             if not skip_dispatch:
                 await self._dispatcher.dispatch(report)
             else:
                 report_dict["_report_obj"] = report
 
             logger.info(
-                "分析完成: %s | 评分 %s | 信心度 %.0f%% | 强度 %s",
+                "分析完成: %s | 评分 %s | 信心度 %.0f%% | 状态 %s | 触发 %s",
                 symbol, report.score_display,
-                report.confidence, report.signal_strength.value,
+                report.confidence, report.market_state.value,
+                trigger_reason or "定时",
             )
             return report_dict
 
@@ -543,6 +654,13 @@ class JobScheduler:
             },
             "trade": JobScheduler._serialize_trade(report.trade_suggestion),
             "trade_plan": JobScheduler._serialize_trade_plan(report.trade_plan),
+            "market_state": report.market_state.value,
+            "market_state_label": {
+                "strong_trend": "强趋势",
+                "ranging": "震荡",
+                "extreme_divergence": "极端背离",
+            }.get(report.market_state.value, report.market_state.value),
+            "trigger_reason": report.trigger_reason,
         }
 
     @staticmethod
