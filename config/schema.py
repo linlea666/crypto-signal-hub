@@ -209,7 +209,7 @@ class GeneralConfig(BaseModel):
     )
     actionable_min_confidence: float = Field(
         default=70.0, ge=30.0, le=95.0,
-        description="可操作信号的最低信心度门槛（%），低于此值的信号标记为"观察"，不发通知不执行"
+        description="可操作信号的最低信心度门槛(%)，低于此值的信号标记为观察，不发通知不执行"
     )
 
 
