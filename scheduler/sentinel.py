@@ -61,6 +61,12 @@ class SentinelMonitor:
         self._tick_count = 0
         self._trigger_count = 0
 
+    def update_config(self, config: "AppConfig") -> None:
+        """热重载配置（由 JobScheduler.reload_config 调用）"""
+        self._config = config
+        self._sentinel_cfg = config.sentinel
+        logger.info("哨兵配置已更新")
+
     async def start(self) -> None:
         if not self._sentinel_cfg.enabled:
             logger.info("哨兵监控已禁用")

@@ -35,6 +35,21 @@
                 <label>分析周期（分钟）</label>
                 <input type="number" name="general.analysis_interval_minutes" value="{{ config.general.analysis_interval_minutes }}" class="input" min="5" max="1440" style="max-width:200px">
             </div>
+
+            <div class="form-group" style="margin-top:16px">
+                <label>可操作信号门槛（信心度 %）</label>
+                <div style="display:flex;align-items:center;gap:12px;max-width:400px">
+                    <input type="range" name="general.actionable_min_confidence"
+                           value="{{ config.general.actionable_min_confidence }}"
+                           min="30" max="95" step="5" class="range" style="flex:1"
+                           oninput="this.nextElementSibling.textContent=this.value">
+                    <span class="range-value" style="min-width:28px;text-align:center">{{ config.general.actionable_min_confidence|int }}</span>
+                    <span>%</span>
+                </div>
+                <p class="price-meta" style="margin-top:6px">
+                    信心度 ≥ 此门槛且至少一个策略可操作时，才发送通知和推送到执行层。低于门槛的信号仍会显示在大屏和历史记录中，标记为"观察"。
+                </p>
+            </div>
         </div>
 
         <!-- 评分权重 -->
@@ -349,7 +364,7 @@
                     </label>
                     <label class="exec-toggle-item">
                         <input type="checkbox" name="executor.enable_trailing_stop" {{ 'checked' if config.executor.enable_trailing_stop }}>
-                        <span>移动止损</span>
+                        <span>移动止盈</span>
                     </label>
                     <label class="exec-toggle-item">
                         <input type="checkbox" name="executor.enable_dynamic_sizing" {{ 'checked' if config.executor.enable_dynamic_sizing }}>
@@ -472,7 +487,10 @@ async function saveConfig(e) {
             obj = obj[parts[i]];
         }
         const lastKey = parts[parts.length - 1];
+        const inputEl = form.querySelector('[name="' + key + '"]');
+        const isSecret = inputEl && inputEl.type === 'password';
         if (value === 'on') obj[lastKey] = true;
+        else if (isSecret) obj[lastKey] = value;
         else if (!isNaN(value) && value !== '') obj[lastKey] = Number(value);
         else if (lastKey === 'symbols' || lastKey === 'to' || lastKey === 'daily_report_times')
             obj[lastKey] = value.split(',').map(s => s.trim()).filter(Boolean);

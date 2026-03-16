@@ -217,6 +217,41 @@ class ExchangeClient:
             logger.error("取消订单失败 %s: %s", order_id, e)
             return False
 
+    async def reduce_position(self, symbol: str, side: str, ratio: float) -> bool:
+        """市价减仓指定比例（用于 TP1 部分平仓）"""
+        if not self._exchange or ratio <= 0:
+            return False
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
+        close_side = "sell" if side == "buy" else "buy"
+        pos_side = "long" if side == "buy" else "short"
+        try:
+            positions = await self._exchange.fetch_positions([swap_symbol])
+            pos = next(
+                (p for p in positions if p["side"] == pos_side and float(p.get("contracts", 0) or 0) > 0),
+                None,
+            )
+            if not pos:
+                logger.warning("减仓失败: 未找到持仓 %s %s", swap_symbol, pos_side)
+                return False
+
+            total = float(pos["contracts"])
+            reduce_amount = round(total * min(ratio, 1.0), 6)
+            if reduce_amount <= 0:
+                return False
+
+            await self._exchange.create_order(
+                symbol=swap_symbol,
+                type="market",
+                side=close_side,
+                amount=reduce_amount,
+                params={"tdMode": "cross", "posSide": pos_side, "reduceOnly": True},
+            )
+            logger.info("减仓成功 %s %s %.4f/%.4f (%.0f%%)", swap_symbol, pos_side, reduce_amount, total, ratio * 100)
+            return True
+        except Exception as e:
+            logger.error("减仓失败 %s %s: %s", swap_symbol, pos_side, e)
+            return False
+
     async def close_position(self, symbol: str, side: str) -> bool:
         """市价平仓"""
         if not self._exchange:

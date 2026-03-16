@@ -152,6 +152,9 @@ class ExecutionEngine:
                 position_size_label=s.position_size.value,
                 market_state=report.market_state.value,
                 created_at=now,
+                tp_mode=s.tp_mode,
+                trailing_callback_pct=s.trailing_callback_pct,
+                tp1_close_ratio=s.tp1_close_ratio,
             )
             self._pending[strat_id] = pending
 
@@ -169,6 +172,9 @@ class ExecutionEngine:
                 risk_reward=s.risk_reward,
                 leverage=self._config.default_leverage,
                 created_at=now.isoformat(),
+                tp_mode=s.tp_mode,
+                trailing_callback_pct=s.trailing_callback_pct,
+                tp1_close_ratio=s.tp1_close_ratio,
             )
             self._tracker.save_order(order)
             registered += 1
@@ -290,7 +296,7 @@ class ExecutionEngine:
                 await self._sync_open_orders()
                 await self._trailing_stop_check()
             except Exception as e:
-                logger.debug("订单同步异常: %s", e)
+                logger.warning("订单同步异常: %s", e)
             await asyncio.sleep(60)
 
     async def _sync_open_orders(self) -> None:
@@ -398,6 +404,9 @@ class ExecutionEngine:
                         "tp2": s.take_profit_2,
                         "rr": s.risk_reward,
                         "size": s.position_size.value,
+                        "tp_mode": s.tp_mode,
+                        "trailing_callback_pct": s.trailing_callback_pct,
+                        "tp1_close_ratio": s.tp1_close_ratio,
                     })
 
             filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2))
@@ -413,8 +422,7 @@ class ExecutionEngine:
             date_dir.mkdir(parents=True, exist_ok=True)
             filepath = date_dir / f"{order_id[:8]}.json"
 
-            history = self._tracker.get_history(limit=500)
-            record = next((h for h in history if h.get("id") == order_id), None)
+            record = self._tracker.get_order(order_id)
             if record:
                 filepath.write_text(json.dumps(record, ensure_ascii=False, indent=2))
                 logger.debug("交易记录已存档: %s", filepath)
@@ -436,8 +444,11 @@ class ExecutionEngine:
         logger.debug("策略过期: %s %s %s", p.symbol, p.strategy_type, sid[:8])
 
     async def _trailing_stop_check(self) -> None:
-        """移动止损：当价格到达 TP1 后，将 SL 移动到入场价（盈亏平衡点）。
-        通过交易所 API 修改真实止损单。
+        """混合止盈移动止损逻辑：
+
+        阶段一（TP1 前）：SL 不变，等待 TP1
+        阶段二（TP1 触发时）：部分平仓 tp1_close_ratio，SL 移至入场价
+        阶段三（TP1 后持续）：跟踪极值价格，按 trailing_callback_pct 更新 SL
         """
         if not self._config.enable_trailing_stop:
             return
@@ -446,54 +457,114 @@ class ExecutionEngine:
         if not open_orders:
             return
 
+        now_iso = now_beijing().isoformat()
+
         for order in open_orders:
             entry = order.get("entry_price", 0) or 0
             tp1 = order.get("take_profit_1", 0) or 0
-            sl = order.get("stop_loss", 0) or 0
             if entry <= 0 or tp1 <= 0:
                 continue
-            if entry > 0 and abs(sl - entry) / entry < 0.001:
-                continue
 
+            side = order["side"]
             price = await self._client.get_market_price(order["symbol"])
             if not price:
                 continue
 
-            side = order["side"]
-            tp1_reached = (side == "buy" and price >= tp1) or (side == "sell" and price <= tp1)
+            tp_mode = order.get("tp_mode", "hybrid")
+            callback_pct = order.get("trailing_callback_pct", 1.0) or 1.0
+            close_ratio = order.get("tp1_close_ratio", 0.5) or 0.5
+            tp1_triggered = bool(order.get("tp1_triggered_at"))
+            highest = order.get("highest_price", 0) or 0
 
-            if not tp1_reached:
-                continue
+            is_long = side == "buy"
+            tp1_reached = (is_long and price >= tp1) or (not is_long and price <= tp1)
 
-            new_sl = entry
-            algo_orders = await self._client.fetch_algo_orders(order["symbol"])
-            pos_side = "long" if side == "buy" else "short"
-            sl_algo = next(
-                (a for a in algo_orders
-                 if a.get("posSide") == pos_side and a.get("slTriggerPx")),
-                None,
-            )
+            # ── 阶段一 → 阶段二：TP1 首次触发 ──
+            if tp1_reached and not tp1_triggered:
+                # hybrid 模式：部分平仓 + 移SL到入场价
+                if tp_mode == "hybrid" and close_ratio > 0:
+                    ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
+                    if ok:
+                        logger.info(
+                            "TP1触发部分平仓 [%s] %s 平%.0f%% @ %.2f",
+                            order["symbol"], side, close_ratio * 100, price,
+                        )
+                    else:
+                        logger.warning("TP1部分平仓失败 [%s] %s", order["symbol"], side)
 
-            if sl_algo:
-                ok = await self._client.amend_stop_loss(
-                    order["symbol"], sl_algo["algoId"], new_sl,
-                )
-                if ok:
-                    self._tracker.update_status(
-                        order["id"], OrderStatus.OPEN, stop_loss=new_sl,
-                    )
-                    logger.info(
-                        "移动止损成功: %s %s SL %.2f → %.2f (盈亏平衡)",
-                        order["symbol"], side, sl, new_sl,
-                    )
-            else:
+                # 更新 SL 到入场价（盈亏平衡）
+                new_sl = entry
+                await self._amend_sl_on_exchange(order, new_sl)
+
+                extreme = price
                 self._tracker.update_status(
-                    order["id"], OrderStatus.OPEN, stop_loss=new_sl,
+                    order["id"], OrderStatus.OPEN,
+                    stop_loss=new_sl,
+                    tp1_triggered_at=now_iso,
+                    highest_price=extreme,
+                    trailing_sl=new_sl,
                 )
                 logger.info(
-                    "移动止损(本地): %s %s SL %.2f → %.2f (未找到交易所算法单)",
-                    order["symbol"], side, sl, new_sl,
+                    "TP1触发 [%s] %s: SL→%.2f(盈亏平衡), 极值=%.2f, tp_mode=%s",
+                    order["symbol"], side, new_sl, extreme, tp_mode,
                 )
+                continue
+
+            # ── 阶段三：TP1 之后的移动止盈 ──
+            if tp1_triggered and tp_mode == "hybrid":
+                if is_long:
+                    new_highest = max(highest, price)
+                    trail_sl = new_highest * (1 - callback_pct / 100)
+                else:
+                    new_highest = min(highest, price) if highest > 0 else price
+                    trail_sl = new_highest * (1 + callback_pct / 100)
+
+                current_trail_sl = order.get("trailing_sl", 0) or 0
+
+                sl_improved = (
+                    (is_long and trail_sl > current_trail_sl)
+                    or (not is_long and (current_trail_sl == 0 or trail_sl < current_trail_sl))
+                )
+
+                if sl_improved:
+                    await self._amend_sl_on_exchange(order, trail_sl)
+                    self._tracker.update_status(
+                        order["id"], OrderStatus.OPEN,
+                        highest_price=new_highest,
+                        trailing_sl=round(trail_sl, 2),
+                        stop_loss=round(trail_sl, 2),
+                    )
+                    logger.info(
+                        "移动止盈更新 [%s] %s: 极值%.2f→%.2f, SL %.2f→%.2f",
+                        order["symbol"], side,
+                        highest, new_highest,
+                        current_trail_sl, trail_sl,
+                    )
+                elif new_highest != highest:
+                    self._tracker.update_status(
+                        order["id"], OrderStatus.OPEN,
+                        highest_price=new_highest,
+                    )
+
+    async def _amend_sl_on_exchange(self, order: dict, new_sl: float) -> None:
+        """尝试在交易所修改止损单"""
+        algo_orders = await self._client.fetch_algo_orders(order["symbol"])
+        pos_side = "long" if order["side"] == "buy" else "short"
+        sl_algo = next(
+            (a for a in algo_orders
+             if a.get("posSide") == pos_side and a.get("slTriggerPx")),
+            None,
+        )
+        if sl_algo:
+            ok = await self._client.amend_stop_loss(
+                order["symbol"], sl_algo["algoId"], new_sl,
+            )
+            if not ok:
+                logger.warning("交易所修改SL失败 %s → %.2f", order["symbol"], new_sl)
+        else:
+            logger.debug(
+                "未找到交易所算法单，仅本地更新SL %s → %.2f", order["symbol"], new_sl,
+            )
 
     def export_trade_log(self, limit: int = 200) -> list[dict]:
         """导出交易日志（用于前端下载）"""

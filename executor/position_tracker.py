@@ -12,7 +12,6 @@ from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from core.time_utils import now_beijing
 from typing import Generator
 
 from core.time_utils import now_beijing
@@ -43,7 +42,13 @@ CREATE TABLE IF NOT EXISTS executor_orders (
     created_at TEXT NOT NULL,
     triggered_at TEXT DEFAULT '',
     opened_at TEXT DEFAULT '',
-    closed_at TEXT DEFAULT ''
+    closed_at TEXT DEFAULT '',
+    tp_mode TEXT DEFAULT 'hybrid',
+    trailing_callback_pct REAL DEFAULT 1.0,
+    tp1_close_ratio REAL DEFAULT 0.5,
+    highest_price REAL DEFAULT 0,
+    trailing_sl REAL DEFAULT 0,
+    tp1_triggered_at TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_exec_orders_symbol ON executor_orders(symbol);
@@ -68,9 +73,23 @@ class PositionTracker:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
+    _MIGRATION_COLUMNS = [
+        ("tp_mode", "TEXT DEFAULT 'hybrid'"),
+        ("trailing_callback_pct", "REAL DEFAULT 1.0"),
+        ("tp1_close_ratio", "REAL DEFAULT 0.5"),
+        ("highest_price", "REAL DEFAULT 0"),
+        ("trailing_sl", "REAL DEFAULT 0"),
+        ("tp1_triggered_at", "TEXT DEFAULT ''"),
+    ]
+
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(_EXECUTOR_SCHEMA)
+            for col_name, col_def in self._MIGRATION_COLUMNS:
+                try:
+                    conn.execute(f"ALTER TABLE executor_orders ADD COLUMN {col_name} {col_def}")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
             logger.info("执行层数据库初始化完成")
 
     @contextmanager
@@ -96,8 +115,10 @@ class PositionTracker:
                     trigger_price, entry_price, stop_loss, take_profit_1, take_profit_2,
                     quantity, leverage, exchange_order_id, risk_reward,
                     pnl_usd, pnl_pct, reject_reason,
-                    created_at, triggered_at, opened_at, closed_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    created_at, triggered_at, opened_at, closed_at,
+                    tp_mode, trailing_callback_pct, tp1_close_ratio,
+                    highest_price, trailing_sl, tp1_triggered_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     order.id, order.signal_id, order.symbol, order.strategy_type,
                     order.side, order.status.value,
@@ -107,6 +128,8 @@ class PositionTracker:
                     order.risk_reward, order.pnl_usd, order.pnl_pct,
                     order.reject_reason,
                     order.created_at, order.triggered_at, order.opened_at, order.closed_at,
+                    order.tp_mode, order.trailing_callback_pct, order.tp1_close_ratio,
+                    order.highest_price, order.trailing_sl, order.tp1_triggered_at,
                 ),
             )
 
@@ -115,6 +138,8 @@ class PositionTracker:
         "quantity", "leverage", "exchange_order_id", "risk_reward",
         "pnl_usd", "pnl_pct", "reject_reason",
         "triggered_at", "opened_at", "closed_at",
+        "tp_mode", "trailing_callback_pct", "tp1_close_ratio",
+        "highest_price", "trailing_sl", "tp1_triggered_at",
     })
 
     def update_status(

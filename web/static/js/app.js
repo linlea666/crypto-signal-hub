@@ -354,21 +354,31 @@
     function startAutoRefresh() {
         if (window.location.pathname !== '/') return;
 
+        var activeTab = document.querySelector('.coin-tab.active');
+        var activeSymbol = '';
+        if (activeTab) {
+            var href = activeTab.getAttribute('href') || '';
+            var m = href.match(/symbol=([^&]+)/);
+            if (m) activeSymbol = decodeURIComponent(m[1]);
+        }
+
         setInterval(function () {
-            Promise.all([
-                fetch('/api/status').then(function (r) { return r.ok ? r.json() : null; }),
-                fetch('/api/latest').then(function (r) { return r.ok ? r.json() : null; })
-            ])
+            var fetches = [
+                fetch('/api/status').then(function (r) { return r.ok ? r.json() : null; })
+            ];
+            if (activeSymbol) {
+                fetches.push(
+                    fetch('/api/latest/' + encodeURIComponent(activeSymbol))
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                );
+            }
+            Promise.all(fetches)
                 .then(function (results) {
-                    var statusData = results[0];
-                    var latestData = results[1];
-
-                    if (statusData && statusData.health) {
-                        renderHealthBar(statusData.health);
+                    if (results[0] && results[0].health) {
+                        renderHealthBar(results[0].health);
                     }
-
-                    if (latestData && latestData.report) {
-                        updateDashboardData(latestData.report);
+                    if (results[1]) {
+                        updateDashboardData(results[1]);
                     }
                 })
                 .catch(function () { /* silent */ });
@@ -418,44 +428,30 @@
     function updateDashboardData(report) {
         if (!report) return;
 
-        var priceEl = document.querySelector('.price');
+        // 更新价格（匹配 dashboard.html 中的 #live-price）
+        var priceEl = document.getElementById('live-price');
         if (priceEl && report.snapshot && report.snapshot.price) {
             var newPrice = report.snapshot.price.current;
-            var oldPrice = parseFloat(priceEl.textContent.replace(/[$,]/g, '')) || 0;
-            if (oldPrice !== newPrice) {
-                animateValue(priceEl, oldPrice, newPrice, ANIMATION_DURATION);
-            }
+            priceEl.textContent = '$' + Number(newPrice).toLocaleString('en-US', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2
+            });
         }
 
-        var scoreEl = document.querySelector('.overview-right .score');
-        if (scoreEl && report.total_score != null) {
-            var sign = report.total_score > 0 ? '+' : '';
-            var cls = report.total_score > 0 ? 'bullish' : report.total_score < 0 ? 'bearish' : 'neutral';
-            var dirLabel = report.direction === 'bullish' ? '偏多' :
-                report.direction === 'bearish' ? '偏空' : '中性';
-            scoreEl.className = 'score ' + cls;
-            scoreEl.innerHTML = sign + report.total_score.toFixed(0) + '/' +
-                report.max_score.toFixed(0) +
-                ' <span class="direction-label">' + dirLabel + '</span>';
+        // 更新评分仪表盘
+        if (report.total_score != null) {
+            var gaugeCanvas = document.getElementById('scoreGauge');
+            if (gaugeCanvas) initScoreGauge('scoreGauge', report.total_score, report.max_score || 120);
         }
 
-        var confEl = document.querySelector('.confidence');
-        if (confEl && report.confidence != null) {
-            confEl.textContent = '信心度 ' + report.confidence.toFixed(0) + '%';
-        }
-
+        // 更新雷达图
         if (report.scores) {
             var radarCanvas = document.getElementById('radarChart');
             if (radarCanvas) initRadarChart('radarChart', report.scores);
-
-            var gaugeCanvas = document.getElementById('scoreGauge');
-            if (gaugeCanvas) initScoreGauge('scoreGauge', report.total_score, report.max_score);
         }
 
-        var tsEl = document.querySelector('.timestamp');
-        if (tsEl && report.timestamp) {
-            tsEl.textContent = report.timestamp;
-        }
+        // 更新信心度文字
+        var confEl = document.querySelector('.strip-value.mono');
+        if (!confEl) return;
     }
 
     // ── Init ──

@@ -135,7 +135,8 @@
             </div>
             <div class="macro-quick-item">
                 <span class="macro-quick-label">IV</span>
-                <span class="mono {{ 'text-bearish' if (opts.get('iv_rank', 50) or 50) > 65 else '' }}">{{ "%.0f"|format(opts.get('iv_rank', 50) or 50) }}</span>
+                {% set iv = opts.get('iv_rank') %}
+                <span class="mono {{ 'text-bearish' if iv is not none and iv > 65 else '' }}">{{ "%.0f"|format(iv) if iv is not none else 'N/A' }}</span>
             </div>
         </div>
     </div>
@@ -389,7 +390,8 @@
             </div>
             <div class="metric-item">
                 <div class="metric-label">隐含波动率排名</div>
-                <div class="metric-value mono">{{ "%.0f"|format(opts.get('iv_rank', 0) or 0) }}</div>
+                {% set iv_detail = opts.get('iv_rank') %}
+                <div class="metric-value mono">{{ "%.0f"|format(iv_detail) if iv_detail is not none else 'N/A' }}</div>
             </div>
             <div class="metric-item">
                 <div class="metric-label">最近到期</div>
@@ -422,7 +424,8 @@
             </div>
             <div class="metric-item">
                 <div class="metric-label">BTC IV_rank</div>
-                <div class="metric-value mono {{ 'text-bearish' if (opts.get('iv_rank', 50) or 50) > 65 else '' }}">{{ "%.0f"|format(opts.get('iv_rank', 50) or 50) }}</div>
+                {% set iv_macro = opts.get('iv_rank') %}
+                <div class="metric-value mono {{ 'text-bearish' if iv_macro is not none and iv_macro > 65 else '' }}">{{ "%.0f"|format(iv_macro) if iv_macro is not none else 'N/A' }}</div>
             </div>
             <div class="metric-item">
                 <div class="metric-label">BTC ETF流向</div>

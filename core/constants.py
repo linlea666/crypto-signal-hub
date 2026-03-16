@@ -98,6 +98,8 @@ class PositionSize(str, Enum):
 
 # 盈亏比阈值——低于此值不给出交易建议（小亏大赚原则）
 MIN_RISK_REWARD_RATIO = 1.5
+# 混合止盈模式下的最低盈亏比（有移动止盈兜底，可更宽松）
+MIN_RISK_REWARD_HYBRID = 1.0
 
 # ── 评分边界常量 ──
 # 各因子默认满分，可在配置中覆盖

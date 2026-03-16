@@ -46,7 +46,9 @@ class NotificationDispatcher:
                 channel.update_config(configs_by_name[channel.name])
 
     async def dispatch(self, report: SignalReport) -> None:
-        """决定是否发送并分发到所有渠道"""
+        """决定是否发送并分发到所有渠道。
+        调用方（jobs.py）已按配置门槛过滤观察信号，这里只做限频和分发。
+        """
         should_send = self._throttle.should_send(report)
 
         if not should_send:

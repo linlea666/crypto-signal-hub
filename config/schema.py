@@ -19,7 +19,7 @@ class ExchangeConfig(BaseModel):
 class FactorWeightConfig(BaseModel):
     """单个评分因子的配置"""
     enabled: bool = True
-    weight: float = 15.0
+    weight: float = Field(default=15.0, ge=0.0, le=100.0)
 
 
 class ScoringConfig(BaseModel):
@@ -181,7 +181,7 @@ class ExecutorConfig(BaseModel):
         default=True, description="连亏自动缩仓"
     )
     enable_trailing_stop: bool = Field(
-        default=False, description="启用移动止损（TP1后SL移到盈亏平衡）"
+        default=True, description="启用混合止盈（TP1平50%+剩余仓位移动止盈跟踪）"
     )
     enable_signal_export: bool = Field(
         default=True, description="自动存档信号和执行记录"
@@ -206,6 +206,10 @@ class GeneralConfig(BaseModel):
     strategy_mode: str = Field(
         default="adaptive",
         description="策略模式: adaptive(三档自适应) / trend_only(只顺势)"
+    )
+    actionable_min_confidence: float = Field(
+        default=70.0, ge=30.0, le=95.0,
+        description="可操作信号的最低信心度门槛（%），低于此值的信号标记为"观察"，不发通知不执行"
     )
 
 

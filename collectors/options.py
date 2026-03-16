@@ -94,6 +94,8 @@ class OptionsCollector(DataCollector):
         put_oi: dict[float, float] = {}
         total_call_oi = 0.0
         total_put_oi = 0.0
+        oi_success = 0
+        oi_fail = 0
 
         for opt in nearest_options:
             raw_strike = opt.get("strike")
@@ -117,7 +119,9 @@ class OptionsCollector(DataCollector):
                 elif opt_type == "put":
                     put_oi[strike] = oi_val
                     total_put_oi += oi_val
+                oi_success += 1
             except Exception:
+                oi_fail += 1
                 continue
 
         # 计算 Max Pain
@@ -129,14 +133,33 @@ class OptionsCollector(DataCollector):
 
         pcr = (total_put_oi / total_call_oi) if total_call_oi > 0 else 1.0
 
+        # 诊断日志：数据质量
+        total_attempts = oi_success + oi_fail
+        if total_attempts > 0 and oi_success / total_attempts < 0.5:
+            logger.warning(
+                "期权OI采集成功率低: %d/%d (%.0f%%), %s %s",
+                oi_success, total_attempts,
+                oi_success / total_attempts * 100, base, nearest_expiry,
+            )
+        if pcr == 1.0 and total_call_oi > 0:
+            logger.warning("期权PCR恰好1.0 (put=%.0f, call=%.0f)，数据可能异常", total_put_oi, total_call_oi)
+        if call_peaks and put_peaks and call_peaks == put_peaks:
+            logger.warning("期权Call/Put OI峰值完全相同: %s，数据质量存疑", call_peaks)
+
+        logger.debug(
+            "期权采集完成: %s 到期=%s 合约=%d OI成功=%d/%d PCR=%.4f call_peaks=%s put_peaks=%s",
+            base, nearest_expiry, len(nearest_options), oi_success, total_attempts,
+            pcr, call_peaks, put_peaks,
+        )
+
         return OptionsData(
             max_pain=max_pain,
-            max_pain_distance_pct=0.0,  # 需要当前价才能算，由评分层计算
+            max_pain_distance_pct=0.0,
             nearest_expiry=nearest_expiry,
             call_oi_peaks=call_peaks,
             put_oi_peaks=put_peaks,
             put_call_ratio=round(pcr, 4),
-            iv_rank=50.0,  # Phase 2: 实现 IV 历史百分位
+            iv_rank=None,  # 尚无 IV 历史数据，由评分层按 None 处理
         )
 
     @staticmethod

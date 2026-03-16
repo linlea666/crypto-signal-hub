@@ -9,6 +9,8 @@
 - 重大经济事件临近（标记，信心度层处理）
 """
 
+from datetime import datetime, timezone
+
 from core.constants import Direction, FactorName
 from core.interfaces import ScoreFactor
 from core.models import FactorScore, MarketSnapshot
@@ -67,14 +69,25 @@ class MacroFactor(ScoreFactor):
         score += us_score
         details_parts.append(f"纳指{nq:+.1f}%/标普{sp:+.1f}% → 美股{us_score:+d}")
 
-        # ── DXY 美元指数（±5 分，反相关）──
+        # ── DXY 美元指数（±5 分，反相关，渐进分级）──
         dxy = macro.dxy_change_pct
-        if dxy > 0.5:
-            score -= 5
-            details_parts.append(f"DXY+{dxy:.1f}%(美元走强,利空BTC)")
+        if dxy > 1.0:
+            dxy_s = -5
+        elif dxy > 0.5:
+            dxy_s = -3
+        elif dxy > 0.3:
+            dxy_s = -1
+        elif dxy < -1.0:
+            dxy_s = 5
         elif dxy < -0.5:
-            score += 5
-            details_parts.append(f"DXY{dxy:.1f}%(美元走弱,利好BTC)")
+            dxy_s = 3
+        elif dxy < -0.3:
+            dxy_s = 1
+        else:
+            dxy_s = 0
+        if dxy_s != 0:
+            score += dxy_s
+            details_parts.append(f"DXY{dxy:+.1f}%({dxy_s:+d})")
 
         # ── 加密市场波动率（±5 分，用 BTC IV_rank 替代 VIX） ──
         # IV_rank 高 = 市场恐慌/波动大 → 风险资产承压
@@ -114,12 +127,49 @@ class MacroFactor(ScoreFactor):
             score -= 5
             details_parts.append("ETF连续净流出(机构撤退)")
 
-        # ── 重大事件临近（标记但不评分，信心度层处理）──
+        # ── 重大事件临近衰减评分（高影响事件越近扣分越多）──
         if snapshot.events:
             high_impact = [e for e in snapshot.events if e.impact == "high"]
             if high_impact:
-                names = ", ".join(e.name for e in high_impact[:2])
-                details_parts.append(f"⚠️ 近期重大事件: {names}")
+                now = datetime.now(timezone.utc)
+                worst_penalty = 0
+                event_names = []
+                for evt in high_impact[:3]:
+                    evt_time = evt.time if evt.time.tzinfo else evt.time.replace(tzinfo=timezone.utc)
+                    hours_away = (evt_time - now).total_seconds() / 3600
+                    if hours_away < 0:
+                        hours_away = 0
+                    if hours_away <= 24:
+                        penalty = -3
+                    elif hours_away <= 48:
+                        penalty = -2
+                    elif hours_away <= 72:
+                        penalty = -1
+                    else:
+                        penalty = 0
+                    if penalty < worst_penalty:
+                        worst_penalty = penalty
+                    label = f"{evt.name}({hours_away:.0f}h后)"
+                    event_names.append(label)
+
+                if worst_penalty < 0:
+                    score += worst_penalty
+                    details_parts.append(f"⚠️ 重大事件临近({worst_penalty:+d}): {', '.join(event_names)}")
+                else:
+                    details_parts.append(f"近期事件: {', '.join(event_names)}")
+
+        # ── 数据新鲜度衰减：仅衰减美股相关部分，DXY/事件/IV 独立更新不受影响 ──
+        age = macro.data_age_hours
+        if age > 6 and us_score != 0:
+            now_utc = datetime.now(timezone.utc)
+            hour_utc = now_utc.hour
+            us_market_closed = hour_utc >= 21 or hour_utc < 14
+            if us_market_closed:
+                decay = 0.5
+                old_us = us_score
+                decayed_us = round(us_score * decay)
+                score += (decayed_us - old_us)
+                details_parts.append(f"⏳ 美股休市且数据{age:.1f}h未更新,美股分{old_us:+d}→{decayed_us:+d}")
 
         score = max(-self._max, min(self._max, score))
         direction = Direction.BULLISH if score > 0 else (

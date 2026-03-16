@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.constants import Direction, FactorName
 from core.interfaces import ScoreFactor
@@ -41,6 +41,22 @@ class OptionsFactor(ScoreFactor):
                 max_score=self._max,
                 direction=Direction.NEUTRAL,
                 details="期权数据不可用",
+            )
+
+        # ── 数据质量校验：检测疑似默认值/采集异常 ──
+        data_suspect = (
+            opts.put_call_ratio == 1.0
+            and opts.iv_rank is None
+            and opts.call_oi_peaks == opts.put_oi_peaks
+            and len(opts.call_oi_peaks) > 0
+        )
+        if data_suspect:
+            return FactorScore(
+                name=FactorName.OPTIONS,
+                score=0,
+                max_score=self._max,
+                direction=Direction.NEUTRAL,
+                details="期权数据质量不足(PCR=1.0且Call/Put峰值相同)，跳过评分",
             )
 
         score = 0.0
@@ -84,10 +100,15 @@ class OptionsFactor(ScoreFactor):
             details_parts.append(f"PCR={pcr:.2f}(正常)")
 
         # ── IV Rank 评分（±3 分，辅助）──
-        if opts.iv_rank < 20:
-            details_parts.append(f"IV偏低({opts.iv_rank:.0f}%),可能酝酿大行情")
-        elif opts.iv_rank > 80:
-            details_parts.append(f"IV偏高({opts.iv_rank:.0f}%),市场预期高波动")
+        if opts.iv_rank is not None:
+            if opts.iv_rank < 20:
+                score += 3
+                details_parts.append(f"IV偏低({opts.iv_rank:.0f}%),酝酿大行情(+3)")
+            elif opts.iv_rank > 80:
+                score -= 3
+                details_parts.append(f"IV偏高({opts.iv_rank:.0f}%),高波动风险(-3)")
+            else:
+                details_parts.append(f"IV_rank={opts.iv_rank:.0f}%(正常)")
 
         # ── 期权 OI 峰值作为关键位信息（不加分，但记录）──
         if opts.call_oi_peaks:
@@ -114,7 +135,7 @@ def _expiry_weight(nearest_expiry: str) -> float:
         return 0.5
     try:
         exp_date = datetime.strptime(nearest_expiry[:10], "%Y-%m-%d")
-        days = (exp_date - datetime.utcnow()).days
+        days = (exp_date - datetime.now(timezone.utc).replace(tzinfo=None)).days
         if days <= 0:
             return 1.0
         if days <= 7:

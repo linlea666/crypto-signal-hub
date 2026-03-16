@@ -16,7 +16,13 @@
 
 from __future__ import annotations
 
-from core.constants import Direction, MarketState, MIN_RISK_REWARD_RATIO, PositionSize
+from core.constants import (
+    Direction,
+    MarketState,
+    MIN_RISK_REWARD_HYBRID,
+    MIN_RISK_REWARD_RATIO,
+    PositionSize,
+)
 from core.models import (
     ConditionalStrategy,
     KeyLevel,
@@ -27,6 +33,7 @@ from core.models import (
 )
 
 BREAKOUT_BUFFER_PCT = 0.008  # 0.8% — 突破/跌破 buffer（比 0.5% 更宽，减少假突破）
+HYBRID_TREND_MULTIPLIER = 1.25  # hybrid 模式仅用于仓位 composite 加成，不膨胀 R:R 阈值
 
 
 # ══════════════════════════════════════
@@ -172,9 +179,8 @@ def _build_pullback_long(
     risk = entry_mid - stop_loss
     if risk <= 0:
         return None
-    rr = (tp1 - entry_mid) / risk
+    rr_fixed = round((tp1 - entry_mid) / risk, 2)
 
-    # 失效条件
     invalidation_price = sl_level.price if sl_level else trigger * 0.98
     invalidation = f"价格跌破${invalidation_price:.0f}则策略失效"
 
@@ -187,13 +193,14 @@ def _build_pullback_long(
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
-        risk_reward=round(rr, 2),
-        position_size=_determine_position_size(rr, confidence),
+        risk_reward=rr_fixed,
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
         sl_source=f"{trigger_level.source}下方1%",
         tp1_source=_level_source_label(resistances, tp1),
         reasoning=f"在{trigger_level.source}支撑位${trigger:.0f}附近挂买单，止损${stop_loss:.0f}",
         valid_hours=24,
         invalidation=invalidation,
+        tp_mode="hybrid",
     )
 
 
@@ -225,7 +232,7 @@ def _build_bounce_short(
     risk = stop_loss - entry_mid
     if risk <= 0:
         return None
-    rr = (entry_mid - tp1) / risk
+    rr_fixed = round((entry_mid - tp1) / risk, 2)
 
     invalidation_price = sl_level.price if sl_level else trigger * 1.02
     invalidation = f"价格放量突破${invalidation_price:.0f}则策略失效"
@@ -239,13 +246,14 @@ def _build_bounce_short(
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
-        risk_reward=round(rr, 2),
-        position_size=_determine_position_size(rr, confidence),
+        risk_reward=rr_fixed,
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
         sl_source=f"{trigger_level.source}上方1%",
         tp1_source=_level_source_label(supports, tp1),
         reasoning=f"在{trigger_level.source}阻力位${trigger:.0f}附近挂卖单，止损${stop_loss:.0f}",
         valid_hours=24,
         invalidation=invalidation,
+        tp_mode="hybrid",
     )
 
 
@@ -273,7 +281,7 @@ def _build_breakout_long(
     risk = trigger - stop_loss
     if risk <= 0:
         return None
-    rr = (tp1 - trigger) / risk
+    rr_fixed = round((tp1 - trigger) / risk, 2)
 
     invalidation = f"突破后回落至${target_level.price:.0f}下方则为假突破"
 
@@ -286,13 +294,14 @@ def _build_breakout_long(
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
-        risk_reward=round(rr, 2),
-        position_size=_determine_position_size(rr, confidence),
+        risk_reward=rr_fixed,
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
         sl_source=f"{target_level.source}(突破后变支撑)",
         tp1_source=_level_source_label(resistances[1:], tp1) if len(resistances) >= 2 else "等距目标",
         reasoning=f"突破{target_level.source}阻力${target_level.price:.0f}后追多",
         valid_hours=12,
         invalidation=invalidation,
+        tp_mode="hybrid",
     )
 
 
@@ -320,7 +329,7 @@ def _build_breakout_short(
     risk = stop_loss - trigger
     if risk <= 0:
         return None
-    rr = (trigger - tp1) / risk
+    rr_fixed = round((trigger - tp1) / risk, 2)
 
     invalidation = f"跌破后反弹回${target_level.price:.0f}上方则为假跌破"
 
@@ -333,13 +342,14 @@ def _build_breakout_short(
         stop_loss=round(stop_loss, 2),
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
-        risk_reward=round(rr, 2),
-        position_size=_determine_position_size(rr, confidence),
+        risk_reward=rr_fixed,
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
         sl_source=f"{target_level.source}(跌破后变阻力)",
         tp1_source=_level_source_label(supports[1:], tp1) if len(supports) >= 2 else "等距目标",
         reasoning=f"跌破{target_level.source}支撑${target_level.price:.0f}后追空",
         valid_hours=12,
         invalidation=invalidation,
+        tp_mode="hybrid",
     )
 
 
@@ -347,7 +357,7 @@ def _build_breakout_short(
 # 内部辅助函数
 # ══════════════════════════════════════
 
-_STRENGTH_ORDER = {"strong": 3, "medium": 2, "weak": 1}
+_STRENGTH_ORDER = {"critical": 4, "strong": 3, "medium": 2, "weak": 1}
 
 
 def _find_nearest_level(
@@ -408,18 +418,28 @@ def _level_source_label(levels: list[KeyLevel], target_price: float) -> str:
     return "计算目标"
 
 
-def _determine_position_size(risk_reward: float, confidence: float) -> PositionSize:
+def _determine_position_size(
+    risk_reward: float, confidence: float, tp_mode: str = "hybrid",
+    level_strength: str = "medium",
+) -> PositionSize:
     """根据盈亏比和信心度连续计算仓位（软分级，消除硬边界）。
 
     score = rr_factor * conf_factor, 映射到 LIGHT / NORMAL / HEAVY
+    hybrid 模式下最低盈亏比降为 1.0（有移动止盈兜底）。
+    critical 级别关键位（成交密集区共振）额外加成 30%。
     """
-    if risk_reward < MIN_RISK_REWARD_RATIO:
+    min_rr = MIN_RISK_REWARD_HYBRID if tp_mode == "hybrid" else MIN_RISK_REWARD_RATIO
+    if risk_reward < min_rr:
         return PositionSize.SKIP
 
-    rr_factor = min(risk_reward / 2.0, 2.0)  # 1.5→0.75, 2.0→1.0, 3.0→1.5, 4.0→2.0
-    conf_factor = confidence / 70.0           # 60→0.86, 70→1.0, 80→1.14
+    rr_factor = min(risk_reward / 2.0, 2.0)
+    conf_factor = confidence / 70.0
 
-    composite = rr_factor * conf_factor       # 0.64 ~ 2.28+
+    composite = rr_factor * conf_factor
+    if tp_mode == "hybrid":
+        composite *= HYBRID_TREND_MULTIPLIER  # hybrid 有移动止盈，仓位评估给予额外信心
+    if level_strength == "critical":
+        composite *= 1.3  # 密集成交区共振加成
     if composite >= 1.8:
         return PositionSize.HEAVY
     if composite >= 1.1:
@@ -472,11 +492,13 @@ def _apply_state_constraints(
                         reasoning=s.reasoning + "（极端背离，限轻仓）",
                         valid_hours=s.valid_hours,
                         invalidation=s.invalidation,
+                        tp_mode=s.tp_mode,
+                        trailing_callback_pct=s.trailing_callback_pct,
+                        tp1_close_ratio=s.tp1_close_ratio,
                     )
             result.append(s)
         return result
 
-    # ranging: 保留全部，逆势策略标注高风险
     result = []
     for s in strategies:
         if s.strategy_type in counter_types:
@@ -496,6 +518,9 @@ def _apply_state_constraints(
                 reasoning=s.reasoning,
                 valid_hours=s.valid_hours,
                 invalidation=s.invalidation,
+                tp_mode=s.tp_mode,
+                trailing_callback_pct=s.trailing_callback_pct,
+                tp1_close_ratio=s.tp1_close_ratio,
             )
         result.append(s)
     return result
@@ -524,18 +549,25 @@ def _derive_immediate_action(
     strategies: list[ConditionalStrategy],
 ) -> str:
     """生成即时行动建议。"""
-    # 有无 R:R 达标的策略
     viable = [s for s in strategies if s.position_size != PositionSize.SKIP]
 
     if not viable:
-        return "当前各价位盈亏比均不足1.5:1，建议等待更好位置"
+        skipped = [s for s in strategies if s.position_size == PositionSize.SKIP]
+        if skipped:
+            best_skip = max(skipped, key=lambda s: s.risk_reward)
+            return (
+                f"当前最优策略「{best_skip.label}」R:R仅{best_skip.risk_reward:.1f}:1，"
+                f"不足开仓门槛，建议等待回调或突破后再入场"
+            )
+        return "当前无有效策略，建议观望"
 
     if direction == Direction.NEUTRAL:
         return "方向不明确，建议挂条件单等待触发，不主动追单"
 
     d_label = "做多" if direction == Direction.BULLISH else "做空"
     best = viable[0]
-    return f"偏{d_label}，优先关注「{best.label}」策略（R:R {best.risk_reward:.1f}:1）"
+    tp_label = "混合止盈" if best.tp_mode == "hybrid" else "固定止盈"
+    return f"偏{d_label}，优先关注「{best.label}」策略（R:R {best.risk_reward:.1f}:1，{tp_label}）"
 
 
 def _derive_analysis_note(

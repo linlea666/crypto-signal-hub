@@ -55,6 +55,10 @@ class MacroCollector(DataCollector):
         fg = await self._fetch_fear_greed()
         etf_flow = await self._fetch_etf_flow()
 
+        # 计算数据新鲜度（距上次真实刷新的小时数）
+        now = time.monotonic()
+        data_age_hours = (now - self._ifnews_cache_ts) / 3600 if self._ifnews_cache_ts > 0 else 0.0
+
         snapshot_data["macro"] = MacroData(
             nasdaq_price=nasdaq.get("price"),
             nasdaq_change_pct=nasdaq.get("change_pct", 0),
@@ -62,11 +66,12 @@ class MacroCollector(DataCollector):
             sp500_change_pct=sp500.get("change_pct", 0),
             dxy_price=dxy.get("price"),
             dxy_change_pct=dxy.get("change_pct", 0),
-            vix_value=None,  # ifnews 不含 VIX，评分层用 BTC IV_rank 替代
+            vix_value=None,
             fear_greed_value=fg.get("value"),
             fear_greed_label=fg.get("label", "unknown"),
             btc_etf_flow_usd=etf_flow.get("flow_usd"),
             btc_etf_flow_3d_trend=etf_flow.get("trend", "unknown"),
+            data_age_hours=round(data_age_hours, 2),
         )
         return snapshot_data
 

@@ -48,6 +48,11 @@ class SignalScorer:
         self._config = scoring_config
         self._factors: list[ScoreFactor] = []
 
+    def update_config(self, scoring_config: ScoringConfig) -> None:
+        """热重载评分配置（权重/启用状态变更立即生效）"""
+        self._config = scoring_config
+        logger.info("评分引擎配置已更新")
+
     def register_factor(self, factor: ScoreFactor) -> None:
         self._factors.append(factor)
         logger.info("注册评分因子: %s (满分 ±%.0f)", factor.name, factor.max_score)
@@ -81,8 +86,8 @@ class SignalScorer:
         # 3. 判断方向（动态阈值：满分的 8%）
         direction = self._determine_direction(total_score, max_possible)
 
-        # 4. 计算信心度
-        confidence = calculate_confidence(factor_scores)
+        # 4. 计算信心度（传入事件列表用于衰减）
+        confidence = calculate_confidence(factor_scores, snapshot.events)
 
         # 5. 判断信号强度
         strength = self._determine_strength(confidence)

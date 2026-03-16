@@ -182,7 +182,7 @@ def _reload_all_services(app) -> None:
     if scheduler:
         scheduler.reload_config(config)
 
-    # NOFX 采集器动态启停
+    # NOFX 采集器动态启停 + 配置更新
     registry = app.state.collector_registry
     if registry:
         nofx_want = config.nofx.enabled and bool(config.nofx.api_key)
@@ -192,6 +192,10 @@ def _reload_all_services(app) -> None:
             registry.register(NofxCollector(config.nofx))
         elif not nofx_want and nofx_has:
             registry.unregister("nofx")
+        elif nofx_want and nofx_has:
+            collector = next((c for c in registry._collectors if c.name == "nofx"), None)
+            if collector and hasattr(collector, "update_config"):
+                collector.update_config(config.nofx)
 
     health_checker = app.state.health_checker
     if health_checker:

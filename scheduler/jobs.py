@@ -87,6 +87,8 @@ class JobScheduler:
         self._config = config
         self._ai_reporter.update_config(config.ai)
         self._dispatcher.update_channel_configs(email=config.email)
+        self._scorer.update_config(config.scoring)
+        self._sentinel.update_config(config)
 
         # 执行层动态启停
         if config.executor.enabled and not self._executor:
@@ -120,6 +122,17 @@ class JobScheduler:
             self._scorer.unregister_factor(FactorName.NOFX_SIGNAL)
 
         logger.info("调度器配置已热重载")
+
+    def _is_signal_actionable(self, report: SignalReport) -> bool:
+        """根据配置的门槛判断信号是否可操作（替代硬编码的 report.is_actionable）"""
+        threshold = self._config.general.actionable_min_confidence
+        if report.confidence < threshold:
+            return False
+        if report.trade_plan:
+            return any(
+                s.position_size.value != "skip" for s in report.trade_plan.strategies
+            )
+        return False
 
     def setup(self) -> None:
         """配置所有定时任务"""
@@ -608,31 +621,40 @@ class JobScheduler:
                 )
 
             # 4. 存储
+            is_actionable = self._is_signal_actionable(report)
+
             report_dict = self._serialize_report(report)
+            report_dict["is_actionable"] = is_actionable
             self._db.save_report(report_dict)
             self._latest_reports[symbol] = report_dict
 
             # 5. 更新哨兵缓存的关键位
             self._sentinel.update_levels(symbol, report.key_levels)
-
-            # 5.5 推送交易计划到执行层（如已启用）
-            if self._executor and report.trade_plan:
+            if self._executor and report.trade_plan and is_actionable:
                 try:
                     await self._executor.on_new_plan(symbol, report)
                 except Exception as e:
                     logger.warning("执行层接收计划失败: %s", e)
 
-            # 6. 通知分发（日报场景由调用方单独处理）
+            # 6. 通知分发（仅可操作信号，日报场景由调用方单独处理）
             if not skip_dispatch:
-                await self._dispatcher.dispatch(report)
+                if is_actionable:
+                    await self._dispatcher.dispatch(report)
+                else:
+                    logger.info(
+                        "观察信号 %s 跳过推送 (信心度=%.0f%% < 门槛%.0f%%)",
+                        report.id[:8], report.confidence,
+                        self._config.general.actionable_min_confidence,
+                    )
             else:
                 report_dict["_report_obj"] = report
 
+            action_label = "可操作" if is_actionable else "观察"
             logger.info(
-                "分析完成: %s | 评分 %s | 信心度 %.0f%% | 状态 %s | 触发 %s",
+                "分析完成: %s | 评分 %s | 信心度 %.0f%% | 状态 %s | %s | 触发 %s",
                 symbol, report.score_display,
                 report.confidence, report.market_state.value,
-                trigger_reason or "定时",
+                action_label, trigger_reason or "定时",
             )
             return report_dict
 
@@ -669,7 +691,7 @@ class JobScheduler:
         "orderbook_ask": "卖盘密集区",
         "volume_profile": "成交密集区",
     }
-    _STRENGTH_LABELS = {"strong": "强", "medium": "中", "weak": "弱"}
+    _STRENGTH_LABELS = {"critical": "关键共振", "strong": "强", "medium": "中", "weak": "弱"}
 
     @staticmethod
     def _serialize_report(report) -> dict:
@@ -782,6 +804,9 @@ class JobScheduler:
                 "reasoning": s.reasoning,
                 "valid_hours": s.valid_hours,
                 "invalidation": s.invalidation,
+                "tp_mode": s.tp_mode,
+                "trailing_callback_pct": s.trailing_callback_pct,
+                "tp1_close_ratio": s.tp1_close_ratio,
             })
 
         return {

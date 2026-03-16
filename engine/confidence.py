@@ -7,17 +7,23 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from core.constants import Direction
-from core.models import FactorScore
+from core.models import FactorScore, UpcomingEvent
 
 
-def calculate_confidence(factor_scores: list[FactorScore]) -> float:
+def calculate_confidence(
+    factor_scores: list[FactorScore],
+    events: list[UpcomingEvent] | None = None,
+) -> float:
     """计算信号信心度（0-100%）。
 
     算法：
     1. 统计各因子的方向
     2. 计算多数方向占比
     3. 用加权一致性分数得出信心度
+    4. 重大事件临近时衰减（24h 内高影响事件 × 0.85）
 
     Returns:
         0-100 的信心度百分比
@@ -25,21 +31,17 @@ def calculate_confidence(factor_scores: list[FactorScore]) -> float:
     if not factor_scores:
         return 0.0
 
-    # 过滤掉中性因子（不参与信心度计算）
     directional = [fs for fs in factor_scores if fs.direction != Direction.NEUTRAL]
     if not directional:
-        return 30.0  # 全部中性 = 低信心度
+        return 30.0
 
     total_factors = len(directional)
     bullish_count = sum(1 for fs in directional if fs.direction == Direction.BULLISH)
     bearish_count = total_factors - bullish_count
     majority_count = max(bullish_count, bearish_count)
 
-    # 基础一致性：多数方向占比（如 5/7 = 71%）
     basic_consistency = (majority_count / total_factors) * 100
 
-    # 加权一致性：强信号的一致性更重要
-    # 每个因子的 |normalized score| 作为权重
     weighted_bull = sum(abs(fs.normalized) for fs in directional if fs.direction == Direction.BULLISH)
     weighted_bear = sum(abs(fs.normalized) for fs in directional if fs.direction == Direction.BEARISH)
     total_weight = weighted_bull + weighted_bear
@@ -49,13 +51,26 @@ def calculate_confidence(factor_scores: list[FactorScore]) -> float:
     else:
         weighted_consistency = basic_consistency
 
-    # 综合信心度 = 基础一致性 25% + 加权一致性 75%
-    # 强信号的方向比弱信号的数量更重要
     confidence = basic_consistency * 0.25 + weighted_consistency * 0.75
 
-    # 因子数量不足时降低信心度
+    # 方向性因子过少时惩罚：避免 1 个因子有方向就得 100% 信心度
+    if len(directional) < 3:
+        confidence *= 0.4 + len(directional) * 0.2  # 1→0.6x, 2→0.8x
+
     all_count = len(factor_scores)
     if all_count < 4:
-        confidence *= 0.7  # 数据不全则打折
+        confidence *= 0.7
+
+    # 重大事件临近衰减（×0.90，宏观因子已有独立扣分，此处仅做置信度维度轻度抑制）
+    if events:
+        now = datetime.now(timezone.utc)
+        for evt in events:
+            if evt.impact != "high":
+                continue
+            evt_time = evt.time if evt.time.tzinfo else evt.time.replace(tzinfo=timezone.utc)
+            hours_away = (evt_time - now).total_seconds() / 3600
+            if 0 <= hours_away <= 24:
+                confidence *= 0.90
+                break
 
     return min(100.0, max(0.0, confidence))

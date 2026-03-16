@@ -97,7 +97,7 @@ class OptionsData:
     call_oi_peaks: list[float] = field(default_factory=list)
     put_oi_peaks: list[float] = field(default_factory=list)
     put_call_ratio: float = 1.0
-    iv_rank: float = 50.0  # 0-100 百分位
+    iv_rank: float | None = None  # 0-100 百分位，None=未采集
 
 
 @dataclass(frozen=True)
@@ -114,6 +114,7 @@ class MacroData:
     btc_etf_flow_3d_trend: str = "unknown"      # inflow / outflow / mixed
     fear_greed_value: int | None = None          # 0-100
     fear_greed_label: str = "unknown"
+    data_age_hours: float = 0.0                  # 数据距上次更新的小时数
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,6 @@ class MarketSnapshot:
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典，用于 AI 输入和存储"""
-        import dataclasses
         return _dataclass_to_dict(self)
 
 
@@ -205,7 +205,7 @@ class KeyLevel:
     price: float
     level_type: str      # support / resistance
     source: str          # 来源说明（如 "options_put_oi", "previous_low"）
-    strength: str        # strong / medium / weak
+    strength: str        # critical / strong / medium / weak
 
 
 @dataclass(frozen=True)
@@ -259,6 +259,10 @@ class ConditionalStrategy:
     reasoning: str
     valid_hours: int = 24
     invalidation: str = ""  # 失效条件描述
+    tp_mode: str = "hybrid"             # "fixed"=固定止盈 / "hybrid"=混合止盈
+    trailing_callback_pct: float = 1.0  # 移动止盈回撤幅度 %
+    tp1_close_ratio: float = 0.5        # TP1 平仓比例 (0.5=平50%)
+    market_state: str = ""              # 传递给执行层用于风控
 
 
 @dataclass(frozen=True)
@@ -298,6 +302,20 @@ class SignalReport:
     alert_type: AlertType = AlertType.HOURLY_REPORT
     market_state: MarketState = MarketState.RANGING
     trigger_reason: str = ""                         # 哨兵触发原因（空=定时分析）
+
+    @property
+    def is_actionable(self) -> bool:
+        """默认可操作判定（使用固定 70% 门槛）。
+        实际运行时由 JobScheduler._is_signal_actionable() 根据配置门槛判定。
+        此属性保留作为序列化和无配置上下文时的兜底。
+        """
+        if self.confidence < 70.0:
+            return False
+        if self.trade_plan:
+            return any(
+                s.position_size.value != "skip" for s in self.trade_plan.strategies
+            )
+        return False
 
     @property
     def score_display(self) -> str:

@@ -124,19 +124,19 @@ def identify_key_levels(snapshot: MarketSnapshot) -> KeyLevels:
                     source="max_pain", strength="strong",
                 ))
 
-    # ── Volume Profile 成交密集区（套牢区） ──
+    # ── Volume Profile 成交密集区（套牢区，基础 strong） ──
     for vp_price in tech.volume_profile_levels:
         if abs(vp_price - price) / price < 0.001:
-            continue  # 太接近当前价，无参考意义
+            continue
         if vp_price > price * 1.001:
             resistances.append(KeyLevel(
                 price=vp_price, level_type="resistance",
-                source="volume_profile", strength="medium",
+                source="volume_profile", strength="strong",
             ))
         elif vp_price < price * 0.999:
             supports.append(KeyLevel(
                 price=vp_price, level_type="support",
-                source="volume_profile", strength="medium",
+                source="volume_profile", strength="strong",
             ))
 
     # ── 挂单簿深度密集区 ──
@@ -222,32 +222,51 @@ def _add_round_number_levels(
             ))
 
 
+_VP_SOURCES = frozenset({"volume_profile", "orderbook_bid", "orderbook_ask"})
+
 def _deduplicate_levels(levels: list[KeyLevel], reference_price: float) -> list[KeyLevel]:
-    """合并相近价位，多来源汇聚时提升强度（共振）"""
+    """合并相近价位，多来源汇聚时提升强度（共振）。
+
+    共振规则：
+    - 2 来源汇聚 → strong
+    - 3+ 来源汇聚 → strong
+    - volume_profile/orderbook + 至少 1 个其他独立来源 → critical（密集成交区共振）
+    """
     if not levels or reference_price <= 0:
         return levels
 
     threshold = reference_price * 0.005
-    strength_order = {"strong": 3, "medium": 2, "weak": 1}
+    strength_order = {"critical": 4, "strong": 3, "medium": 2, "weak": 1}
     result: list[KeyLevel] = []
-    source_count: list[int] = []
+    source_sets: list[set[str]] = []
 
     for level in levels:
         merged = False
         for i, existing in enumerate(result):
             if abs(level.price - existing.price) < threshold:
-                source_count[i] += 1
-                if strength_order.get(level.strength, 0) > strength_order.get(existing.strength, 0):
-                    result[i] = level
-                elif source_count[i] >= 2 and existing.strength != "strong":
+                source_sets[i].add(level.source)
+                sources = source_sets[i]
+
+                has_vp = bool(sources & _VP_SOURCES)
+                non_vp_count = len(sources - _VP_SOURCES)
+
+                if has_vp and non_vp_count >= 1:
+                    new_strength = "critical"
+                elif len(sources) >= 2:
+                    new_strength = "strong"
+                else:
+                    new_strength = existing.strength
+
+                if strength_order.get(new_strength, 0) > strength_order.get(existing.strength, 0):
+                    best_source = level.source if has_vp and level.source in _VP_SOURCES else existing.source
                     result[i] = KeyLevel(
                         price=existing.price, level_type=existing.level_type,
-                        source=existing.source, strength="strong",
+                        source=best_source, strength=new_strength,
                     )
                 merged = True
                 break
         if not merged:
             result.append(level)
-            source_count.append(1)
+            source_sets.append({level.source})
 
     return result

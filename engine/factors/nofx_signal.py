@@ -45,7 +45,7 @@ class NofxSignalFactor(ScoreFactor):
         signal = nofx.ai300_signal
         direction = nofx.ai300_direction
         if signal and direction:
-            signal_weight = {"S": 5, "A": 4, "B": 2, "C": -1, "D": -2}.get(signal, 0)
+            signal_weight = {"S": 5, "A": 4, "B": 2, "C": 0, "D": 0}.get(signal, 0)
             if direction == "long":
                 score += signal_weight
             elif direction == "short":

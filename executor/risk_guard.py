@@ -48,8 +48,9 @@ class RiskGuard:
         self._daily_realized_pnl += pnl_usd
         if pnl_usd < 0:
             self._consecutive_losses += 1
-        else:
+        elif pnl_usd > 0:
             self._consecutive_losses = 0
+        # pnl_usd == 0 (breakeven) 不重置连亏计数
 
     def calculate_position_size(
         self,
@@ -114,12 +115,16 @@ class RiskGuard:
     ) -> RiskCheckResult:
         """执行全部风控检查，返回结果"""
 
-        # 1. 盈亏比检查
-        if strategy.risk_reward < self._config.min_risk_reward:
+        # 1. 盈亏比检查（hybrid 模式 R:R 已是真实值，门槛固定 1.0 与 trade_advisor 一致）
+        from core.constants import MIN_RISK_REWARD_HYBRID
+        min_rr = self._config.min_risk_reward
+        if getattr(strategy, "tp_mode", "fixed") == "hybrid":
+            min_rr = MIN_RISK_REWARD_HYBRID
+        if strategy.risk_reward < min_rr:
             return RiskCheckResult(
                 passed=False,
                 reason=RiskRejectReason.LOW_RISK_REWARD,
-                detail=f"盈亏比 {strategy.risk_reward:.2f} < 门槛 {self._config.min_risk_reward}",
+                detail=f"盈亏比 {strategy.risk_reward:.2f} < 门槛 {min_rr:.1f} (tp_mode={getattr(strategy, 'tp_mode', 'fixed')})",
             )
 
         # 2. 获取账户信息
