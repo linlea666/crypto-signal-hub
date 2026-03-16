@@ -873,33 +873,9 @@ class ExecutionEngine:
             tp1_reached = (is_long and price >= tp1) or (not is_long and price <= tp1)
 
             # ── 阶段一 → 阶段二：TP1 首次触发 ──
-            # _set_tp_on_fill 已在交易所设了 TP1 algo（部分平仓）。
-            # 当价格到达 TP1 时，交易所 algo 已自动执行（从 pending 消失）。
-            # 这里通过比较实际持仓量来判断交易所是否已执行部分平仓，避免重复。
+            # TP1 部分平仓由交易所 algo 自动执行（_set_tp_on_fill 已设好）
+            # 程序只负责：① 移 SL 到入场价（盈亏平衡）② 开始追踪极值
             if tp1_reached and not tp1_triggered:
-                if tp_mode == "hybrid" and close_ratio > 0:
-                    orig_qty = order.get("quantity", 0) or 0
-                    current_qty = await self._client.get_position_size(
-                        order["symbol"], side,
-                    )
-                    expected_remaining = orig_qty * (1 - close_ratio)
-                    already_reduced = (
-                        current_qty > 0 and orig_qty > 0
-                        and current_qty <= expected_remaining * 1.05
-                    )
-                    if already_reduced:
-                        logger.info(
-                            "TP1已由交易所算法单执行 [%s] %s 原始=%.4f 当前=%.4f",
-                            order["symbol"], side, orig_qty, current_qty,
-                        )
-                    else:
-                        ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
-                        if ok:
-                            logger.info(
-                                "TP1程序兜底平仓 [%s] %s 平%.0f%% @ %.2f",
-                                order["symbol"], side, close_ratio * 100, price,
-                            )
-
                 new_sl = entry
                 await self._amend_sl_on_exchange(order, new_sl)
 

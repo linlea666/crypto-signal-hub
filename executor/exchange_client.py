@@ -396,24 +396,6 @@ class ExchangeClient:
             logger.warning("设置止盈失败 %s: %s", symbol, e)
             return False
 
-    async def get_position_size(self, symbol: str, side: str) -> float:
-        """查询指定品种/方向的当前持仓数量"""
-        if not self._exchange:
-            return 0.0
-        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
-        pos_side = "long" if side == "buy" else "short"
-        try:
-            positions = await self._exchange.fetch_positions([swap_symbol])
-            pos = next(
-                (p for p in positions
-                 if p["side"] == pos_side and float(p.get("contracts", 0) or 0) > 0),
-                None,
-            )
-            return float(pos["contracts"]) if pos else 0.0
-        except Exception as e:
-            logger.debug("查询持仓数量失败 %s: %s", symbol, e)
-            return 0.0
-
     async def get_min_order_amount(self, symbol: str) -> float:
         """获取最小下单数量"""
         if not self._exchange:
