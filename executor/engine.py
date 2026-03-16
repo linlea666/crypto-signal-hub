@@ -145,6 +145,14 @@ class ExecutionEngine:
 
         now = now_beijing()
         registered = 0
+        placed_sides: set[str] = set()
+
+        best_new: dict[str, float] = {}
+        for s in report.trade_plan.strategies:
+            side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
+            rr = s.rr_at_trigger if s.position_size.value == "skip" else s.risk_reward
+            if side not in best_new or rr > best_new[side]:
+                best_new[side] = rr
 
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
@@ -153,27 +161,32 @@ class ExecutionEngine:
                 logger.debug("跳过 %s %s: 已有同方向持仓", symbol, s.strategy_type)
                 continue
 
-            # ── 限价单智能对比 ──
+            if side in placed_sides:
+                logger.debug("跳过 %s %s: 本轮已有同方向单", symbol, s.strategy_type)
+                continue
+
+            # ── 限价单智能对比（只用本方向最优新策略的 R:R 对比） ──
             if side in existing_limits:
                 old = existing_limits[side]
                 old_rr = old.get("rr_at_trigger", 0)
-                new_rr = s.rr_at_trigger
+                new_best_rr = best_new.get(side, 0)
 
-                if new_rr > old_rr:
+                if new_best_rr > old_rr:
                     logger.info(
                         "新信号优于旧限价单 [%s] %s: R:R %.2f→%.2f，替换",
-                        symbol, side, old_rr, new_rr,
+                        symbol, side, old_rr, new_best_rr,
                     )
-                    await self._cancel_limit_order(old["strat_id"], f"新信号R:R更优({old_rr:.2f}→{new_rr:.2f})")
+                    await self._cancel_limit_order(old["strat_id"], f"新信号R:R更优({old_rr:.2f}→{new_best_rr:.2f})")
                     del existing_limits[side]
                 else:
                     logger.info(
-                        "旧限价单更优 [%s] %s: 旧R:R=%.2f >= 新R:R=%.2f，保留旧单",
-                        symbol, side, old_rr, new_rr,
+                        "旧限价单更优 [%s] %s: 旧R:R=%.2f >= 新最优R:R=%.2f，保留旧单",
+                        symbol, side, old_rr, new_best_rr,
                     )
+                    placed_sides.add(side)
                     continue
 
-            # ── 反方向：如果新策略方向与旧限价单相反，取消旧单 ──
+            # ── 反方向：取消对侧旧限价单 ──
             opposite = "sell" if side == "buy" else "buy"
             if opposite in existing_limits:
                 old_opp = existing_limits.pop(opposite)
@@ -187,12 +200,14 @@ class ExecutionEngine:
                     continue
                 self._register_pending(s, report, side, now)
                 registered += 1
+                placed_sides.add(side)
 
             elif (self._config.enable_limit_orders
                   and s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID):
                 ok = await self._place_limit_order(s, report, side, now)
                 if ok:
                     registered += 1
+                    placed_sides.add(side)
 
         if registered:
             logger.info(
@@ -858,31 +873,32 @@ class ExecutionEngine:
             tp1_reached = (is_long and price >= tp1) or (not is_long and price <= tp1)
 
             # ── 阶段一 → 阶段二：TP1 首次触发 ──
-            # 交易所 TP1 algo order 会自动部分平仓（由 _set_tp_on_fill 设置）
-            # 程序只需检测到 TP1 价格已到达，执行：移 SL 到入场价 + 开始追踪
-            # 如果交易所 TP1 algo 漏设（旧订单），程序兜底 reduce_position
+            # _set_tp_on_fill 已在交易所设了 TP1 algo（部分平仓）。
+            # 当价格到达 TP1 时，交易所 algo 已自动执行（从 pending 消失）。
+            # 这里通过比较实际持仓量来判断交易所是否已执行部分平仓，避免重复。
             if tp1_reached and not tp1_triggered:
                 if tp_mode == "hybrid" and close_ratio > 0:
-                    # 检查交易所是否有 TP algo 已存在
-                    algos = await self._client.fetch_algo_orders(order["symbol"])
-                    pos_side = "long" if is_long else "short"
-                    has_tp_algo = any(
-                        a.get("posSide") == pos_side and a.get("tpTriggerPx")
-                        for a in algos
+                    orig_qty = order.get("quantity", 0) or 0
+                    current_qty = await self._client.get_position_size(
+                        order["symbol"], side,
                     )
-                    if not has_tp_algo:
-                        # 无交易所 TP → 程序兜底执行部分平仓
+                    expected_remaining = orig_qty * (1 - close_ratio)
+                    already_reduced = (
+                        current_qty > 0 and orig_qty > 0
+                        and current_qty <= expected_remaining * 1.05
+                    )
+                    if already_reduced:
+                        logger.info(
+                            "TP1已由交易所算法单执行 [%s] %s 原始=%.4f 当前=%.4f",
+                            order["symbol"], side, orig_qty, current_qty,
+                        )
+                    else:
                         ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
                         if ok:
                             logger.info(
                                 "TP1程序兜底平仓 [%s] %s 平%.0f%% @ %.2f",
                                 order["symbol"], side, close_ratio * 100, price,
                             )
-                    else:
-                        logger.info(
-                            "TP1由交易所算法单执行 [%s] %s @ %.2f",
-                            order["symbol"], side, price,
-                        )
 
                 new_sl = entry
                 await self._amend_sl_on_exchange(order, new_sl)
