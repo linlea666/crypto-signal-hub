@@ -110,6 +110,6 @@ US_PRE_MARKET_ET = (4, 0)     # 04:00 ET
 US_AFTER_HOURS_END_ET = (20, 0)  # 20:00 ET
 
 # 版本号
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 APP_NAME = "CryptoSignal Hub"
 DEFAULT_PORT = 8686
