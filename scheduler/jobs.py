@@ -82,10 +82,31 @@ class JobScheduler:
         return dict(self._latest_reports)
 
     def reload_config(self, config: AppConfig) -> None:
-        """热重载配置，级联更新所有子服务"""
+        """热重载配置，级联更新所有子服务（含执行层动态启停）"""
+        old_executor_enabled = self._config.executor.enabled
         self._config = config
         self._ai_reporter.update_config(config.ai)
         self._dispatcher.update_channel_configs(email=config.email)
+
+        # 执行层动态启停
+        if config.executor.enabled and not self._executor:
+            try:
+                from executor.engine import ExecutionEngine
+                from pathlib import Path
+                db_path = Path(self._db._path) if hasattr(self._db, '_path') else Path("data/signals.db")
+                self._executor = ExecutionEngine(config.executor, db_path)
+                asyncio.ensure_future(self._executor.initialize())
+                logger.info("执行层已通过热重载启用")
+            except Exception as e:
+                logger.warning("热重载启用执行层失败: %s", e)
+        elif not config.executor.enabled and self._executor:
+            asyncio.ensure_future(self._executor.shutdown())
+            self._executor = None
+            logger.info("执行层已通过热重载停用")
+        elif config.executor.enabled and self._executor:
+            self._executor._config = config.executor
+            logger.info("执行层配置已更新")
+
         logger.info("调度器配置已热重载")
 
     def setup(self) -> None:
