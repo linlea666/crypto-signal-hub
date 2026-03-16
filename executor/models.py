@@ -12,16 +12,18 @@ from enum import Enum
 
 class OrderStatus(str, Enum):
     """执行订单状态机"""
-    PENDING = "pending"          # 等待 trigger_price 触发
-    TRIGGERED = "triggered"      # 价格已到达，正在下单
-    OPEN = "open"                # 已成交，持仓中
-    CLOSED_TP1 = "closed_tp1"   # 止盈1触发平仓
-    CLOSED_TP2 = "closed_tp2"   # 止盈2触发平仓
-    CLOSED_SL = "closed_sl"     # 止损触发平仓
-    CLOSED_MANUAL = "closed_manual"  # 手动平仓
-    EXPIRED = "expired"          # valid_hours 超时
-    FAILED = "failed"            # 风控拒绝或下单失败
-    CANCELLED = "cancelled"      # 用户取消
+    PENDING = "pending"                # 等待哨兵价格触发（软件侧监控）
+    LIMIT_PENDING = "limit_pending"    # 限价单已挂到交易所，等待成交
+    TRIGGERED = "triggered"            # 价格已到达，正在下单
+    OPEN = "open"                      # 已成交，持仓中
+    CLOSED_TP1 = "closed_tp1"         # 止盈1触发平仓
+    CLOSED_TP2 = "closed_tp2"         # 止盈2触发平仓
+    CLOSED_SL = "closed_sl"           # 止损触发平仓
+    CLOSED_MANUAL = "closed_manual"    # 手动平仓
+    EXPIRED = "expired"                # valid_hours 超时
+    FAILED = "failed"                  # 风控拒绝或下单失败
+    CANCELLED = "cancelled"            # 用户取消
+    LIMIT_CANCELLED = "limit_cancelled"  # 限价单被取消（失效/新信号覆盖）
 
 
 class RiskRejectReason(str, Enum):

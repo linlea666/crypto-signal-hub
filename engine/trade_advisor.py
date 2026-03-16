@@ -181,6 +181,9 @@ def _build_pullback_long(
         return None
     rr_fixed = round((tp1 - entry_mid) / risk, 2)
 
+    risk_at_trigger = trigger - stop_loss
+    rr_trigger = round((tp1 - trigger) / risk_at_trigger, 2) if risk_at_trigger > 0 else 0.0
+
     invalidation_price = sl_level.price if sl_level else trigger * 0.98
     invalidation = f"价格跌破${invalidation_price:.0f}则策略失效"
 
@@ -201,6 +204,7 @@ def _build_pullback_long(
         valid_hours=24,
         invalidation=invalidation,
         tp_mode="hybrid",
+        rr_at_trigger=rr_trigger,
     )
 
 
@@ -234,6 +238,9 @@ def _build_bounce_short(
         return None
     rr_fixed = round((entry_mid - tp1) / risk, 2)
 
+    risk_at_trigger = stop_loss - trigger
+    rr_trigger = round((trigger - tp1) / risk_at_trigger, 2) if risk_at_trigger > 0 else 0.0
+
     invalidation_price = sl_level.price if sl_level else trigger * 1.02
     invalidation = f"价格放量突破${invalidation_price:.0f}则策略失效"
 
@@ -254,6 +261,7 @@ def _build_bounce_short(
         valid_hours=24,
         invalidation=invalidation,
         tp_mode="hybrid",
+        rr_at_trigger=rr_trigger,
     )
 
 
@@ -302,6 +310,7 @@ def _build_breakout_long(
         valid_hours=12,
         invalidation=invalidation,
         tp_mode="hybrid",
+        rr_at_trigger=rr_fixed,
     )
 
 
@@ -350,6 +359,7 @@ def _build_breakout_short(
         valid_hours=12,
         invalidation=invalidation,
         tp_mode="hybrid",
+        rr_at_trigger=rr_fixed,
     )
 
 

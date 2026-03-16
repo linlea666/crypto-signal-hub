@@ -51,6 +51,10 @@
       <div class="exec-stat-value mono">{{ status.get('pending_strategies', 0) }}</div>
     </div>
     <div class="exec-stat-item">
+      <div class="exec-stat-label">限价挂单</div>
+      <div class="exec-stat-value mono">{{ status.get('limit_orders', 0) }}</div>
+    </div>
+    <div class="exec-stat-item">
       <div class="exec-stat-label">今日交易</div>
       <div class="exec-stat-value mono">{{ status.get('today', {}).get('trade_count', 0) }}</div>
     </div>
@@ -140,13 +144,14 @@
               <td class="mono">{{ o.symbol }}</td>
               <td>{{ o.strategy_type }}</td>
               <td><span class="direction-tag dir-{{ 'long' if o.side=='buy' else 'short' }}">{{ '多' if o.side=='buy' else '空' }}</span></td>
-              <td><span class="order-status status-{{ o.status }}">{{ o.status }}</span></td>
+              {% set status_cn = {'pending':'待触发','limit_pending':'限价挂单','triggered':'触发中','open':'持仓中','closed_tp1':'止盈','closed_sl':'止损','expired':'已过期','failed':'失败','cancelled':'已取消','limit_cancelled':'限价取消'} %}
+              <td><span class="order-status status-{{ o.status }}">{{ status_cn.get(o.status, o.status) }}</span></td>
               <td class="mono">${{ "%.0f"|format(o.trigger_price) }}</td>
               <td class="mono text-bearish">${{ "%.0f"|format(o.stop_loss) }}</td>
               <td class="mono text-bullish">${{ "%.0f"|format(o.take_profit_1) }}</td>
               <td class="mono">{{ "%.2f"|format(o.risk_reward) }}</td>
               <td>
-                {% if o.status == 'pending' %}
+                {% if o.status in ('pending', 'limit_pending') %}
                 <button class="btn btn-sm btn-outline" onclick="cancelOrder('{{ o.id }}')">取消</button>
                 {% elif o.status == 'open' %}
                 <button class="btn btn-sm btn-danger" onclick="closePosition('{{ o.symbol }}','{{ 'long' if o.side=='buy' else 'short' }}','{{ o.id }}')">平仓</button>
@@ -180,7 +185,8 @@
             <td class="mono">{{ o.symbol }}</td>
             <td>{{ o.strategy_type }}</td>
             <td><span class="direction-tag dir-{{ 'long' if o.side=='buy' else 'short' }}">{{ '多' if o.side=='buy' else '空' }}</span></td>
-            <td><span class="order-status status-{{ o.status }}">{{ o.status }}</span></td>
+            {% set status_cn = {'pending':'待触发','limit_pending':'限价挂单','triggered':'触发中','open':'持仓中','closed_tp1':'止盈','closed_tp2':'止盈2','closed_sl':'止损','closed_manual':'手动平仓','expired':'已过期','failed':'失败','cancelled':'已取消','limit_cancelled':'限价取消'} %}
+            <td><span class="order-status status-{{ o.status }}">{{ status_cn.get(o.status, o.status) }}</span></td>
             <td class="mono">${{ "%.0f"|format(o.entry_price) if o.entry_price else '-' }}</td>
             <td class="mono {{ 'text-bullish' if (o.pnl_usd or 0) >= 0 else 'text-bearish' }}">
               {{ "$%.2f"|format(o.pnl_usd) if o.pnl_usd else '-' }}

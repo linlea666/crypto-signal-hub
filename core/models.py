@@ -252,7 +252,7 @@ class ConditionalStrategy:
     stop_loss: float
     take_profit_1: float
     take_profit_2: float
-    risk_reward: float      # 基于入场中点的保守盈亏比
+    risk_reward: float      # 基于入场中点的保守盈亏比（展示用）
     position_size: PositionSize
     sl_source: str
     tp1_source: str
@@ -263,6 +263,7 @@ class ConditionalStrategy:
     trailing_callback_pct: float = 1.0  # 移动止盈回撤幅度 %
     tp1_close_ratio: float = 0.5        # TP1 平仓比例 (0.5=平50%)
     market_state: str = ""              # 传递给执行层用于风控
+    rr_at_trigger: float = 0.0          # 按触发价精确计算的盈亏比（限价单判定用）
 
 
 @dataclass(frozen=True)

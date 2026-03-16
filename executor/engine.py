@@ -2,6 +2,10 @@
 
 管理待触发策略队列，匹配哨兵价格回调，协调风控和下单。
 是信号层（生产者）和交易所（消费者）之间的唯一桥梁。
+
+支持两种执行模式：
+- 软件触发（PENDING）：哨兵价格回调触发后市价下单
+- 限价单（LIMIT_PENDING）：直接挂限价单到交易所，附带 SL，TP 由移动止盈管理
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.schema import ExecutorConfig
-from core.constants import SignalStrength
+from core.constants import MIN_RISK_REWARD_HYBRID, SignalStrength
 from core.time_utils import now_beijing
 from executor.exchange_client import ExchangeClient
 from executor.models import OrderRecord, OrderStatus, PendingStrategy, RiskRejectReason
@@ -45,6 +49,7 @@ class ExecutionEngine:
         self._tracker = PositionTracker(db_path)
 
         self._pending: dict[str, PendingStrategy] = {}
+        self._limit_orders: dict[str, dict] = {}
         self._initialized = False
         self._order_sync_task: asyncio.Task | None = None
 
@@ -66,7 +71,7 @@ class ExecutionEngine:
 
     @property
     def pending_count(self) -> int:
-        return len(self._pending)
+        return len(self._pending) + len(self._limit_orders)
 
     async def initialize(self) -> None:
         if not self._config.enabled:
@@ -79,12 +84,15 @@ class ExecutionEngine:
         await self._client.initialize()
         self._initialized = True
 
+        await self._recover_limit_orders()
+
         self._order_sync_task = asyncio.create_task(self._order_sync_loop())
         logger.info(
-            "执行引擎启动: %s | 自动执行=%s | 杠杆=%dx",
+            "执行引擎启动: %s | 自动执行=%s | 杠杆=%dx | 限价单=%s",
             self._client.mode_label,
             self._config.auto_execute,
             self._config.default_leverage,
+            "开启" if self._config.enable_limit_orders else "关闭",
         )
 
     async def shutdown(self) -> None:
@@ -117,71 +125,29 @@ class ExecutionEngine:
             logger.debug("信心度不足 %.0f < %d，跳过", report.confidence, self._config.min_confidence)
             return
 
-        # 清理旧的 pending（同 symbol）
-        self._expire_symbol(symbol)
+        await self._expire_symbol(symbol)
 
         now = now_beijing()
         registered = 0
 
         for s in report.trade_plan.strategies:
-            if s.position_size.value == "skip":
-                continue
-            if s.risk_reward < self._config.min_risk_reward:
-                continue
-
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
-            strat_id = str(uuid.uuid4())
 
-            pending = PendingStrategy(
-                id=strat_id,
-                signal_id=report.id,
-                symbol=symbol,
-                strategy_type=s.strategy_type,
-                side=side,
-                trigger_price=s.trigger_price,
-                entry_low=s.entry_low,
-                entry_high=s.entry_high,
-                stop_loss=s.stop_loss,
-                take_profit_1=s.take_profit_1,
-                take_profit_2=s.take_profit_2,
-                risk_reward=s.risk_reward,
-                leverage=self._config.default_leverage,
-                confidence=report.confidence,
-                signal_strength=report.signal_strength.value,
-                valid_until=now + timedelta(hours=s.valid_hours),
-                position_size_label=s.position_size.value,
-                market_state=report.market_state.value,
-                created_at=now,
-                tp_mode=s.tp_mode,
-                trailing_callback_pct=s.trailing_callback_pct,
-                tp1_close_ratio=s.tp1_close_ratio,
-            )
-            self._pending[strat_id] = pending
+            if s.position_size.value != "skip":
+                if s.risk_reward < self._config.min_risk_reward:
+                    continue
+                self._register_pending(s, report, side, now)
+                registered += 1
 
-            order = OrderRecord(
-                id=strat_id,
-                signal_id=report.id,
-                symbol=symbol,
-                strategy_type=s.strategy_type,
-                side=side,
-                status=OrderStatus.PENDING,
-                trigger_price=s.trigger_price,
-                stop_loss=s.stop_loss,
-                take_profit_1=s.take_profit_1,
-                take_profit_2=s.take_profit_2,
-                risk_reward=s.risk_reward,
-                leverage=self._config.default_leverage,
-                created_at=now.isoformat(),
-                tp_mode=s.tp_mode,
-                trailing_callback_pct=s.trailing_callback_pct,
-                tp1_close_ratio=s.tp1_close_ratio,
-            )
-            self._tracker.save_order(order)
-            registered += 1
+            elif (self._config.enable_limit_orders
+                  and s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID):
+                ok = await self._place_limit_order(s, report, side, now)
+                if ok:
+                    registered += 1
 
         if registered:
             logger.info(
-                "注册 %d 条待触发策略 [%s] (信心度 %.0f%%, 强度 %s)",
+                "注册 %d 条策略 [%s] (信心度 %.0f%%, 强度 %s)",
                 registered, symbol, report.confidence, report.signal_strength.value,
             )
 
@@ -219,6 +185,187 @@ class ExecutionEngine:
         else:
             return price >= p.trigger_price
 
+    # ── 策略注册（复用内部逻辑） ──
+
+    def _register_pending(
+        self, s, report: "SignalReport", side: str, now: datetime,
+    ) -> None:
+        """注册为 PENDING 策略，等哨兵价格触发后市价执行"""
+        strat_id = str(uuid.uuid4())
+
+        pending = PendingStrategy(
+            id=strat_id,
+            signal_id=report.id,
+            symbol=report.symbol,
+            strategy_type=s.strategy_type,
+            side=side,
+            trigger_price=s.trigger_price,
+            entry_low=s.entry_low,
+            entry_high=s.entry_high,
+            stop_loss=s.stop_loss,
+            take_profit_1=s.take_profit_1,
+            take_profit_2=s.take_profit_2,
+            risk_reward=s.risk_reward,
+            leverage=self._config.default_leverage,
+            confidence=report.confidence,
+            signal_strength=report.signal_strength.value,
+            valid_until=now + timedelta(hours=s.valid_hours),
+            position_size_label=s.position_size.value,
+            market_state=report.market_state.value,
+            created_at=now,
+            tp_mode=s.tp_mode,
+            trailing_callback_pct=s.trailing_callback_pct,
+            tp1_close_ratio=s.tp1_close_ratio,
+        )
+        self._pending[strat_id] = pending
+        self._save_order_record(pending, OrderStatus.PENDING)
+
+    async def _place_limit_order(
+        self, s, report: "SignalReport", side: str, now: datetime,
+    ) -> bool:
+        """对触发价R:R达标但当前R:R不足的策略，直接挂限价单到交易所"""
+        strat_id = str(uuid.uuid4())
+
+        pending = PendingStrategy(
+            id=strat_id,
+            signal_id=report.id,
+            symbol=report.symbol,
+            strategy_type=s.strategy_type,
+            side=side,
+            trigger_price=s.trigger_price,
+            entry_low=s.entry_low,
+            entry_high=s.entry_high,
+            stop_loss=s.stop_loss,
+            take_profit_1=s.take_profit_1,
+            take_profit_2=s.take_profit_2,
+            risk_reward=s.rr_at_trigger,
+            leverage=self._config.default_leverage,
+            confidence=report.confidence,
+            signal_strength=report.signal_strength.value,
+            valid_until=now + timedelta(hours=s.valid_hours),
+            position_size_label=s.position_size.value,
+            market_state=report.market_state.value,
+            created_at=now,
+            tp_mode=s.tp_mode,
+            trailing_callback_pct=s.trailing_callback_pct,
+            tp1_close_ratio=s.tp1_close_ratio,
+        )
+
+        check = await self._guard.pre_trade_check(pending, self._client)
+        if not check.passed:
+            logger.info(
+                "限价单风控拒绝 [%s] %s: %s",
+                report.symbol, s.strategy_type,
+                check.detail,
+            )
+            self._save_order_record(pending, OrderStatus.FAILED,
+                                    reject_reason=f"{check.reason.value}: {check.detail}" if check.reason else check.detail)
+            return False
+
+        if not self._config.auto_execute:
+            logger.info(
+                "限价单策略就绪但未开启自动执行 [%s] %s @ %.2f (R:R@trigger=%.2f)",
+                report.symbol, s.strategy_type, s.trigger_price, s.rr_at_trigger,
+            )
+            self._save_order_record(pending, OrderStatus.FAILED,
+                                    reject_reason="auto_execute=false，仅记录")
+            return False
+
+        buf = self._config.limit_order_price_buffer_pct / 100
+        if side == "buy":
+            limit_price = round(s.trigger_price * (1 + buf), 2)
+        else:
+            limit_price = round(s.trigger_price * (1 - buf), 2)
+
+        amount = await self._calc_order_amount(
+            check.suggested_amount_usd, limit_price, pending.leverage, report.symbol,
+        )
+
+        result = await self._client.place_order_with_sl_tp(
+            symbol=report.symbol,
+            side=side,
+            amount=amount,
+            price=limit_price,
+            stop_loss=s.stop_loss,
+            take_profit=None,
+            leverage=pending.leverage,
+        )
+
+        if result["ok"]:
+            exchange_oid = result.get("order_id", "")
+            self._save_order_record(
+                pending, OrderStatus.LIMIT_PENDING,
+                exchange_order_id=exchange_oid,
+                entry_price=limit_price,
+                quantity=amount,
+            )
+            self._limit_orders[strat_id] = {
+                "exchange_order_id": exchange_oid,
+                "symbol": report.symbol,
+                "side": side,
+                "valid_until": pending.valid_until,
+                "trigger_price": s.trigger_price,
+                "stop_loss": s.stop_loss,
+                "tp_mode": s.tp_mode,
+                "trailing_callback_pct": s.trailing_callback_pct,
+                "tp1_close_ratio": s.tp1_close_ratio,
+            }
+            logger.info(
+                "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R@trigger=%.2f",
+                report.symbol, s.strategy_type, side, amount, limit_price,
+                s.stop_loss, s.rr_at_trigger,
+            )
+            return True
+        else:
+            self._save_order_record(
+                pending, OrderStatus.FAILED,
+                reject_reason=f"限价单下单失败: {result.get('error', '')}",
+            )
+            return False
+
+    def _save_order_record(
+        self, p: PendingStrategy, status: OrderStatus, **kwargs,
+    ) -> None:
+        """统一创建 OrderRecord 并持久化"""
+        order = OrderRecord(
+            id=p.id,
+            signal_id=p.signal_id,
+            symbol=p.symbol,
+            strategy_type=p.strategy_type,
+            side=p.side,
+            status=status,
+            trigger_price=p.trigger_price,
+            stop_loss=p.stop_loss,
+            take_profit_1=p.take_profit_1,
+            take_profit_2=p.take_profit_2,
+            risk_reward=p.risk_reward,
+            leverage=p.leverage,
+            created_at=now_beijing().isoformat(),
+            tp_mode=p.tp_mode,
+            trailing_callback_pct=p.trailing_callback_pct,
+            tp1_close_ratio=p.tp1_close_ratio,
+            exchange_order_id=kwargs.get("exchange_order_id", ""),
+            entry_price=kwargs.get("entry_price", 0.0),
+            quantity=kwargs.get("quantity", 0.0),
+            reject_reason=kwargs.get("reject_reason", ""),
+        )
+        self._tracker.save_order(order)
+
+    async def _calc_order_amount(
+        self, suggested_usd: float, entry_price: float, leverage: int, symbol: str,
+    ) -> float:
+        """计算下单数量，确保满足交易所最低和配置最低"""
+        amount = suggested_usd * leverage / entry_price
+
+        min_exchange = await self._client.get_min_order_amount(symbol)
+        min_config = self._config.min_order_usd * leverage / entry_price
+        effective_min = max(min_exchange or 0, min_config)
+
+        if amount < effective_min:
+            amount = effective_min
+
+        return round(amount, 6)
+
     # ── 执行逻辑 ──
 
     async def _execute_strategy(self, p: PendingStrategy, current_price: float) -> None:
@@ -250,17 +397,14 @@ class ExecutionEngine:
             return
 
         entry_price = (p.entry_low + p.entry_high) / 2
-        amount_usd = check.suggested_amount_usd
-        amount = amount_usd * p.leverage / entry_price
-
-        min_amount = await self._client.get_min_order_amount(p.symbol)
-        if min_amount and amount < min_amount:
-            amount = min_amount
+        amount = await self._calc_order_amount(
+            check.suggested_amount_usd, entry_price, p.leverage, p.symbol,
+        )
 
         result = await self._client.place_order_with_sl_tp(
             symbol=p.symbol,
             side=p.side,
-            amount=round(amount, 6),
+            amount=amount,
             price=round(entry_price, 2),
             stop_loss=p.stop_loss,
             take_profit=p.take_profit_1,
@@ -289,15 +433,142 @@ class ExecutionEngine:
     # ── 订单状态同步 ──
 
     async def _order_sync_loop(self) -> None:
-        """定期同步交易所订单状态，检测 SL/TP 触发，执行移动止损"""
+        """定期同步交易所订单状态，检测限价单成交，执行移动止损"""
         await asyncio.sleep(30)
         while True:
             try:
+                await self._sync_limit_orders()
                 await self._sync_open_orders()
                 await self._trailing_stop_check()
             except Exception as e:
                 logger.warning("订单同步异常: %s", e)
             await asyncio.sleep(60)
+
+    async def _sync_limit_orders(self) -> None:
+        """检查限价单是否成交或需要超时取消"""
+        if not self._limit_orders:
+            return
+
+        now = now_beijing()
+        now_iso = now.isoformat()
+
+        for sid, info in list(self._limit_orders.items()):
+            if now >= info["valid_until"]:
+                await self._cancel_limit_order(sid, "超时")
+                continue
+
+            status = await self._client.get_order_status(
+                info["symbol"], info["exchange_order_id"],
+            )
+
+            if status["status"] == "closed":
+                entry_price = status["avg_price"] or info["trigger_price"]
+                filled = status["filled"]
+                self._tracker.update_status(
+                    sid, OrderStatus.OPEN,
+                    entry_price=entry_price,
+                    quantity=filled,
+                    opened_at=now_iso,
+                )
+                del self._limit_orders[sid]
+                logger.info(
+                    "限价单成交 [%s] %s @ %.2f qty=%.4f",
+                    info["symbol"], info["side"], entry_price, filled,
+                )
+            elif status["status"] == "canceled":
+                self._tracker.update_status(
+                    sid, OrderStatus.LIMIT_CANCELLED,
+                    reject_reason="交易所侧取消",
+                )
+                del self._limit_orders[sid]
+
+    async def _cancel_limit_order(self, strat_id: str, reason: str) -> None:
+        """取消限价单（先检查是否已成交，防止竞态）"""
+        info = self._limit_orders.pop(strat_id, None)
+        if not info:
+            return
+
+        status = await self._client.get_order_status(
+            info["symbol"], info["exchange_order_id"],
+        )
+
+        if status["status"] == "closed":
+            entry_price = status["avg_price"] or info["trigger_price"]
+            self._tracker.update_status(
+                strat_id, OrderStatus.OPEN,
+                entry_price=entry_price,
+                quantity=status["filled"],
+                opened_at=now_beijing().isoformat(),
+            )
+            logger.info(
+                "限价单取消前已成交 [%s] @ %.2f",
+                info["symbol"], entry_price,
+            )
+            return
+
+        await self._client.cancel_order(info["symbol"], info["exchange_order_id"])
+        self._tracker.update_status(
+            strat_id, OrderStatus.LIMIT_CANCELLED,
+            reject_reason=f"限价单取消: {reason}",
+        )
+        logger.info("取消限价单 [%s] %s: %s", info["symbol"], strat_id[:8], reason)
+
+    async def _recover_limit_orders(self) -> None:
+        """启动时恢复或清理未完成的限价单"""
+        pending_limits = self._tracker.get_orders_by_status("limit_pending")
+        if not pending_limits:
+            return
+
+        logger.info("恢复 %d 条未完成限价单...", len(pending_limits))
+        for order in pending_limits:
+            eid = order.get("exchange_order_id", "")
+            sid = order["id"]
+            symbol = order["symbol"]
+
+            if not eid:
+                self._tracker.update_status(
+                    sid, OrderStatus.LIMIT_CANCELLED,
+                    reject_reason="系统重启: 无交易所订单号",
+                )
+                continue
+
+            status = await self._client.get_order_status(symbol, eid)
+
+            if status["status"] == "closed":
+                entry_price = status["avg_price"] or order.get("trigger_price", 0)
+                self._tracker.update_status(
+                    sid, OrderStatus.OPEN,
+                    entry_price=entry_price,
+                    quantity=status["filled"],
+                    opened_at=now_beijing().isoformat(),
+                )
+                logger.info("恢复限价单(已成交) [%s] @ %.2f", symbol, entry_price)
+            elif status["status"] == "open":
+                valid_until_str = order.get("created_at", "")
+                try:
+                    created = datetime.fromisoformat(valid_until_str)
+                    valid_until = created + timedelta(hours=24)
+                except (ValueError, TypeError):
+                    valid_until = now_beijing() + timedelta(hours=4)
+
+                self._limit_orders[sid] = {
+                    "exchange_order_id": eid,
+                    "symbol": symbol,
+                    "side": order.get("side", "buy"),
+                    "valid_until": valid_until,
+                    "trigger_price": order.get("trigger_price", 0),
+                    "stop_loss": order.get("stop_loss", 0),
+                    "tp_mode": order.get("tp_mode", "hybrid"),
+                    "trailing_callback_pct": order.get("trailing_callback_pct", 1.0),
+                    "tp1_close_ratio": order.get("tp1_close_ratio", 0.5),
+                }
+                logger.info("恢复限价单(仍挂出) [%s] eid=%s", symbol, eid[:12])
+            else:
+                await self._client.cancel_order(symbol, eid)
+                self._tracker.update_status(
+                    sid, OrderStatus.LIMIT_CANCELLED,
+                    reject_reason="系统重启清理",
+                )
 
     async def _sync_open_orders(self) -> None:
         """检查 open 状态的订单是否已被交易所平仓（SL/TP 触发）"""
@@ -403,6 +674,7 @@ class ExecutionEngine:
                         "tp1": s.take_profit_1,
                         "tp2": s.take_profit_2,
                         "rr": s.risk_reward,
+                        "rr_at_trigger": s.rr_at_trigger,
                         "size": s.position_size.value,
                         "tp_mode": s.tp_mode,
                         "trailing_callback_pct": s.trailing_callback_pct,
@@ -431,12 +703,19 @@ class ExecutionEngine:
 
     # ── 内部工具 ──
 
-    def _expire_symbol(self, symbol: str) -> None:
-        """清理该 symbol 的所有 pending 策略"""
+    async def _expire_symbol(self, symbol: str) -> None:
+        """清理该 symbol 的所有 pending 策略和限价单"""
         to_remove = [sid for sid, p in self._pending.items() if p.symbol == symbol]
         for sid in to_remove:
-            p = self._pending.pop(sid)
+            self._pending.pop(sid)
             self._tracker.update_status(sid, OrderStatus.EXPIRED)
+
+        limit_to_cancel = [
+            sid for sid, info in self._limit_orders.items()
+            if info["symbol"] == symbol
+        ]
+        for sid in limit_to_cancel:
+            await self._cancel_limit_order(sid, "新信号覆盖")
 
     def _expire_order(self, sid: str, p: PendingStrategy) -> None:
         self._pending.pop(sid, None)
@@ -481,7 +760,6 @@ class ExecutionEngine:
 
             # ── 阶段一 → 阶段二：TP1 首次触发 ──
             if tp1_reached and not tp1_triggered:
-                # hybrid 模式：部分平仓 + 移SL到入场价
                 if tp_mode == "hybrid" and close_ratio > 0:
                     ok = await self._client.reduce_position(order["symbol"], side, close_ratio)
                     if ok:
@@ -492,7 +770,6 @@ class ExecutionEngine:
                     else:
                         logger.warning("TP1部分平仓失败 [%s] %s", order["symbol"], side)
 
-                # 更新 SL 到入场价（盈亏平衡）
                 new_sl = entry
                 await self._amend_sl_on_exchange(order, new_sl)
 
@@ -598,6 +875,7 @@ class ExecutionEngine:
             "auto_execute": self._config.auto_execute,
             "exchange": self._config.exchange,
             "pending_strategies": len(self._pending),
+            "limit_orders": len(self._limit_orders),
             "today": today_stats,
             "overall": overall,
         }

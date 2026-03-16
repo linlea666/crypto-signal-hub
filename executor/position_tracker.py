@@ -177,12 +177,21 @@ class PositionTracker:
     # ── 读操作 ──
 
     def get_active_orders(self) -> list[dict]:
-        """获取活跃订单（pending + open）"""
+        """获取活跃订单（pending + limit_pending + triggered + open）"""
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM executor_orders
-                   WHERE status IN ('pending', 'triggered', 'open')
+                   WHERE status IN ('pending', 'limit_pending', 'triggered', 'open')
                    ORDER BY created_at DESC""",
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_orders_by_status(self, status: str) -> list[dict]:
+        """按状态查询订单"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM executor_orders WHERE status = ? ORDER BY created_at DESC",
+                (status,),
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -207,7 +216,7 @@ class PositionTracker:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM executor_orders
-                   WHERE status NOT IN ('pending', 'triggered', 'open')
+                   WHERE status NOT IN ('pending', 'limit_pending', 'triggered', 'open')
                    ORDER BY closed_at DESC, created_at DESC
                    LIMIT ? OFFSET ?""",
                 (limit, offset),
@@ -260,7 +269,7 @@ class PositionTracker:
                      SUM(CASE WHEN status IN ('closed_tp1','closed_tp2','closed_sl','closed_manual') THEN pnl_usd ELSE 0 END) as total_pnl,
                      AVG(CASE WHEN status IN ('closed_tp1','closed_tp2','closed_sl','closed_manual') THEN pnl_pct END) as avg_pnl_pct
                    FROM executor_orders
-                   WHERE status NOT IN ('pending', 'triggered', 'expired', 'cancelled')"""
+                   WHERE status NOT IN ('pending', 'limit_pending', 'triggered', 'expired', 'cancelled', 'limit_cancelled')"""
             ).fetchone()
             total = row["total"] or 0
             wins = row["wins"] or 0

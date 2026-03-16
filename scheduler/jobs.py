@@ -124,14 +124,24 @@ class JobScheduler:
         logger.info("调度器配置已热重载")
 
     def _is_signal_actionable(self, report: SignalReport) -> bool:
-        """根据配置的门槛判断信号是否可操作（替代硬编码的 report.is_actionable）"""
+        """根据配置的门槛判断信号是否可操作。
+
+        可操作条件（满足其一即可）：
+        1. 信心度达标 + 有策略R:R直接达标（position_size != skip）
+        2. 信心度达标 + 有策略触发价R:R达标（rr_at_trigger >= 1.0，可挂限价单）
+        """
         threshold = self._config.general.actionable_min_confidence
         if report.confidence < threshold:
             return False
-        if report.trade_plan:
-            return any(
-                s.position_size.value != "skip" for s in report.trade_plan.strategies
-            )
+        if not report.trade_plan:
+            return False
+
+        from core.constants import MIN_RISK_REWARD_HYBRID
+        for s in report.trade_plan.strategies:
+            if s.position_size.value != "skip":
+                return True
+            if s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID:
+                return True
         return False
 
     def setup(self) -> None:
@@ -644,8 +654,10 @@ class JobScheduler:
                     threshold = self._config.general.actionable_min_confidence
                     if report.confidence < threshold:
                         reason = f"信心度{report.confidence:.0f}% < 门槛{threshold:.0f}%"
+                    elif report.trade_plan and report.trade_plan.strategies:
+                        reason = "所有策略盈亏比不足(含触发价R:R)"
                     else:
-                        reason = "所有策略盈亏比不足"
+                        reason = "无可用策略"
                     logger.info(
                         "观察信号 %s 跳过推送 (%s)",
                         report.id[:8], reason,
@@ -811,6 +823,7 @@ class JobScheduler:
                 "tp_mode": s.tp_mode,
                 "trailing_callback_pct": s.trailing_callback_pct,
                 "tp1_close_ratio": s.tp1_close_ratio,
+                "rr_at_trigger": s.rr_at_trigger,
             })
 
         return {

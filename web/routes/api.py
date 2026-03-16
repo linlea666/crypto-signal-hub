@@ -324,7 +324,7 @@ async def executor_close_position(request: Request):
 
 @router.post("/executor/cancel")
 async def executor_cancel_order(request: Request):
-    """取消待触发订单"""
+    """取消待触发订单（支持 pending 和 limit_pending）"""
     scheduler = request.app.state.job_scheduler
     executor = scheduler.executor if scheduler else None
     if not executor:
@@ -333,8 +333,15 @@ async def executor_cancel_order(request: Request):
     order_id = body.get("order_id", "")
     if not order_id:
         return JSONResponse({"error": "需要 order_id"}, status_code=400)
+
     from executor.models import OrderStatus
-    executor.tracker.update_status(order_id, OrderStatus.CANCELLED)
+    if order_id in executor._limit_orders:
+        await executor._cancel_limit_order(order_id, "用户手动取消")
+    elif order_id in executor._pending:
+        executor._pending.pop(order_id, None)
+        executor.tracker.update_status(order_id, OrderStatus.CANCELLED)
+    else:
+        executor.tracker.update_status(order_id, OrderStatus.CANCELLED)
     return {"success": True}
 
 

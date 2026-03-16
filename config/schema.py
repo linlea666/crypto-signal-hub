@@ -183,6 +183,18 @@ class ExecutorConfig(BaseModel):
     enable_trailing_stop: bool = Field(
         default=True, description="启用混合止盈（TP1平50%+剩余仓位移动止盈跟踪）"
     )
+    enable_limit_orders: bool = Field(
+        default=True,
+        description="高信心度信号自动挂限价单（当前R:R不足但触发价R:R达标时）",
+    )
+    limit_order_price_buffer_pct: float = Field(
+        default=0.05, ge=0.0, le=0.5,
+        description="限价单价格缓冲(%)，多单在trigger上方加此比例提升成交率",
+    )
+    min_order_usd: float = Field(
+        default=12.0, ge=5.0, le=500.0,
+        description="单笔最小下单金额(USD)，低于交易所最低时自动提升",
+    )
     enable_signal_export: bool = Field(
         default=True, description="自动存档信号和执行记录"
     )

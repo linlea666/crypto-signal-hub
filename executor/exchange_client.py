@@ -155,14 +155,12 @@ class ExchangeClient:
         amount: float,
         price: float,
         stop_loss: float,
-        take_profit: float,
-        leverage: int,
+        take_profit: float | None = None,
+        leverage: int = 3,
     ) -> dict[str, Any]:
-        """原子性下单：开仓 + 止盈止损一次 API 调用。
+        """原子性下单：开仓 + 附带止损(+可选止盈) 一次 API 调用。
 
-        Returns:
-            {"ok": True, "order_id": "...", "algo_ids": [...]}
-            或 {"ok": False, "error": "..."}
+        take_profit=None 时仅附带 SL（用于限价单场景，TP 由移动止盈管理）。
         """
         if not self._exchange:
             return {"ok": False, "error": "客户端未初始化"}
@@ -175,6 +173,14 @@ class ExchangeClient:
 
         pos_side = "long" if side == "buy" else "short"
 
+        algo_ord: dict[str, str] = {
+            "slTriggerPx": str(stop_loss),
+            "slOrdPx": "-1",
+        }
+        if take_profit is not None:
+            algo_ord["tpTriggerPx"] = str(take_profit)
+            algo_ord["tpOrdPx"] = "-1"
+
         try:
             order = await self._exchange.create_order(
                 symbol=swap_symbol,
@@ -185,24 +191,36 @@ class ExchangeClient:
                 params={
                     "tdMode": "cross",
                     "posSide": pos_side,
-                    "attachAlgoOrds": [{
-                        "tpTriggerPx": str(take_profit),
-                        "tpOrdPx": "-1",
-                        "slTriggerPx": str(stop_loss),
-                        "slOrdPx": "-1",
-                    }],
+                    "attachAlgoOrds": [algo_ord],
                 },
             )
             order_id = order.get("id", "")
+            tp_label = f"TP={take_profit:.2f}" if take_profit else "TP=移动止盈"
             logger.info(
-                "下单成功 [%s] %s %s %.4f @ %.2f | SL=%.2f TP=%.2f | %s",
+                "下单成功 [%s] %s %s %.4f @ %.2f | SL=%.2f %s | %s",
                 self.mode_label, side, swap_symbol, amount, price,
-                stop_loss, take_profit, order_id,
+                stop_loss, tp_label, order_id,
             )
             return {"ok": True, "order_id": order_id}
         except Exception as e:
             logger.error("下单失败 %s %s: %s", side, swap_symbol, e)
             return {"ok": False, "error": str(e)}
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict:
+        """查询单个订单状态（用于限价单成交检测）"""
+        if not self._exchange:
+            return {"status": "unknown", "filled": 0, "avg_price": 0}
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
+        try:
+            order = await self._exchange.fetch_order(order_id, swap_symbol)
+            return {
+                "status": order.get("status", "unknown"),
+                "filled": float(order.get("filled", 0) or 0),
+                "avg_price": float(order.get("average", 0) or order.get("price", 0) or 0),
+            }
+        except Exception as e:
+            logger.warning("查询订单状态失败 %s: %s", order_id, e)
+            return {"status": "unknown", "filled": 0, "avg_price": 0}
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         """取消订单"""
