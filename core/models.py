@@ -54,6 +54,11 @@ class TechnicalData:
     macd_cross: str = "none"             # "golden"=金叉, "death"=死叉, "none"=无交叉
     # ── 布林带（ta 库计算，零额外 API） ──
     bb_percent: float | None = None      # %B = (价格-下轨)/(上轨-下轨)，>1=突破上轨, <0=跌破下轨
+    # ── 日线收盘分析（fetch_ohlcv 1d 计算） ──
+    daily_close_strength: float | None = None  # (close-low)/(high-low)，>0.7强势，<0.3弱势
+    daily_close_vs_ma20: str = "unknown"       # above / below / near
+    # ── 成交量分布（Volume Profile 简化版，纯计算） ──
+    volume_profile_levels: list[float] = field(default_factory=list)  # 高成交量价格节点
 
 
 @dataclass(frozen=True)
@@ -99,12 +104,14 @@ class MacroData:
     """宏观市场数据"""
     nasdaq_price: float | None = None
     nasdaq_change_pct: float = 0.0
+    sp500_price: float | None = None
+    sp500_change_pct: float = 0.0
     dxy_price: float | None = None
     dxy_change_pct: float = 0.0
-    vix_value: float | None = None
-    btc_etf_flow_usd: float | None = None      # 当日 ETF 净流入（美元）
+    vix_value: float | None = None              # ifnews 无此字段，保留兼容旧数据
+    btc_etf_flow_usd: float | None = None       # 当日 ETF 净流入（美元）
     btc_etf_flow_3d_trend: str = "unknown"      # inflow / outflow / mixed
-    fear_greed_value: int | None = None         # 0-100
+    fear_greed_value: int | None = None          # 0-100
     fear_greed_label: str = "unknown"
 
 
@@ -208,6 +215,43 @@ class TradeSuggestion:
 
 
 @dataclass(frozen=True)
+class ConditionalStrategy:
+    """单个条件挂单策略（小亏大赚原则）。
+
+    无论当前方向如何，系统始终生成多个条件策略供选择。
+    每个策略包含完整的挂单价、止损止盈、盈亏比及失效条件。
+    """
+    strategy_type: str      # pullback_long / bounce_short / breakout_long / breakout_short
+    label: str              # 回调做多 / 反弹做空 / 突破追多 / 突破追空
+    trigger_price: float    # 触发/挂单价格
+    entry_low: float
+    entry_high: float
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: float
+    risk_reward: float      # 基于入场中点的保守盈亏比
+    position_size: PositionSize
+    sl_source: str
+    tp1_source: str
+    reasoning: str
+    valid_hours: int = 24
+    invalidation: str = ""  # 失效条件描述
+
+
+@dataclass(frozen=True)
+class TradePlan:
+    """完整交易计划——始终包含多个条件策略。
+
+    即使当前不适合入场，也会给出"如果价格到达 X 则做 Y"的挂单方案，
+    让用户提前布局而非追涨杀跌。
+    """
+    market_bias: Direction
+    immediate_action: str               # "观望" / "可考虑入场" 等即时建议
+    strategies: list[ConditionalStrategy] = field(default_factory=list)
+    analysis_note: str = ""
+
+
+@dataclass(frozen=True)
 class SignalReport:
     """完整的分析报告，系统的最终输出。
 
@@ -226,7 +270,8 @@ class SignalReport:
     signal_strength: SignalStrength
     key_levels: KeyLevels
     ai_analysis: str = ""
-    trade_suggestion: TradeSuggestion | None = None
+    trade_suggestion: TradeSuggestion | None = None  # 旧版兼容，渐进弃用
+    trade_plan: TradePlan | None = None              # 新版条件策略计划
     alert_type: AlertType = AlertType.HOURLY_REPORT
 
     @property

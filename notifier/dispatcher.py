@@ -135,7 +135,7 @@ def _default_render(report: SignalReport) -> str:
     env = Environment(loader=FileSystemLoader(str(template_dir)))
 
     try:
-        # 序列化交易建议以便模板消费
+        # 序列化交易建议（旧版兼容）
         trade_ctx = None
         ts = report.trade_suggestion
         if ts is not None:
@@ -157,6 +157,40 @@ def _default_render(report: SignalReport) -> str:
                 "reasoning": ts.reasoning,
             }
 
+        # 序列化条件策略（新版）
+        trade_plan_ctx = None
+        plan = report.trade_plan
+        if plan is not None and plan.strategies:
+            bias_cn = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
+            plan_size_cn = {"skip": "盈亏比不足", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+            trade_plan_ctx = {
+                "market_bias": plan.market_bias.value,
+                "market_bias_label": bias_cn.get(plan.market_bias.value, "中性"),
+                "immediate_action": plan.immediate_action,
+                "analysis_note": plan.analysis_note,
+                "strategies": [
+                    {
+                        "strategy_type": s.strategy_type,
+                        "label": s.label,
+                        "trigger_price": s.trigger_price,
+                        "entry_low": s.entry_low,
+                        "entry_high": s.entry_high,
+                        "stop_loss": s.stop_loss,
+                        "take_profit_1": s.take_profit_1,
+                        "take_profit_2": s.take_profit_2,
+                        "risk_reward": s.risk_reward,
+                        "position_size": s.position_size.value,
+                        "position_label": plan_size_cn.get(s.position_size.value, ""),
+                        "sl_source": s.sl_source,
+                        "tp1_source": s.tp1_source,
+                        "reasoning": s.reasoning,
+                        "valid_hours": s.valid_hours,
+                        "invalidation": s.invalidation,
+                    }
+                    for s in plan.strategies
+                ],
+            }
+
         tpl = env.get_template("email_report.html")
         return tpl.render(
             symbol=report.symbol,
@@ -172,6 +206,7 @@ def _default_render(report: SignalReport) -> str:
             ],
             levels=report.key_levels,
             trade=trade_ctx,
+            trade_plan=trade_plan_ctx,
             ai_analysis=report.ai_analysis or "",
             timestamp=report.timestamp.strftime("%Y-%m-%d %H:%M"),
         )

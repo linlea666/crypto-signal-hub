@@ -126,7 +126,7 @@ crypto-signal-hub/
 | 持仓量 | OKX + Binance | OI 变化 + 价格联动 |
 | 多空比 | OKX | 账户 + Taker 维度 |
 | 期权 | Deribit | Max Pain / PCR / IV |
-| 美股指数 | Yahoo Finance | NASDAQ / DXY / VIX |
+| 全球股市 | ifnews | NASDAQ / S&P500 / DXY |
 | 恐惧贪婪 | Alternative.me | 情绪指标 |
 
 ## 📄 License

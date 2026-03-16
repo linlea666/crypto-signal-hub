@@ -51,13 +51,14 @@
 
   <!-- Factor Scores -->
   <tr><td style="padding:20px 30px">
+    {% set FACTOR_CN = {"technical": "技术面", "funding_rate": "资金费率", "open_interest": "持仓量", "long_short_ratio": "多空比", "options": "期权数据", "macro": "宏观环境", "sentiment": "市场情绪"} %}
     <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">各维度评分</div>
     {% for fs in scores %}
     {% set bar_pct = ((fs.score|abs / fs.max_score) * 50)|int if fs.max_score else 0 %}
     {% set bar_color = '#10b981' if fs.score > 0 else ('#ef4444' if fs.score < 0 else '#64748b') %}
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px">
     <tr>
-      <td width="100" style="font-size:12px;color:#94a3b8;padding:4px 0">{{ fs.name }}</td>
+      <td width="100" style="font-size:12px;color:#94a3b8;padding:4px 0">{{ FACTOR_CN.get(fs.name, fs.name) }}</td>
       <td style="padding:4px 8px">
         <div style="height:6px;background:#1e293b;border-radius:3px;position:relative">
           <div style="height:6px;background:{{ bar_color }};border-radius:3px;width:{{ bar_pct }}%;{% if fs.score < 0 %}margin-left:{{ 50 - bar_pct }}%{% endif %}"></div>
@@ -73,6 +74,7 @@
 
   <!-- Key Levels -->
   {% if levels %}
+  {% set SOURCE_CN = {"swing_high": "前期高点", "swing_low": "前期低点", "24h_high": "24h高点", "24h_low": "24h低点", "round_number": "整数关口", "MA20": "20日均线", "MA60": "60日均线", "options_max_pain": "期权最大痛点", "options_call_oi": "看涨OI密集", "options_put_oi": "看跌OI密集", "orderbook_bid": "买盘密集区", "orderbook_ask": "卖盘密集区", "volume_profile": "成交密集区"} %}
   <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
   <tr><td style="padding:20px 30px">
     <table width="100%" cellpadding="0" cellspacing="0">
@@ -80,13 +82,13 @@
       <td width="50%" style="vertical-align:top">
         <div style="font-size:11px;color:#10b981;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">支撑位</div>
         {% for lv in levels.supports[:3] %}
-        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ lv.source }})</span></div>
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ SOURCE_CN.get(lv.source, lv.source) }})</span></div>
         {% endfor %}
       </td>
       <td width="50%" style="vertical-align:top">
         <div style="font-size:11px;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">阻力位</div>
         {% for lv in levels.resistances[:3] %}
-        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ lv.source }})</span></div>
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;font-family:'Courier New',monospace">${{ "%.0f"|format(lv.price) }} <span style="color:#64748b;font-size:11px">({{ SOURCE_CN.get(lv.source, lv.source) }})</span></div>
         {% endfor %}
       </td>
     </tr>
@@ -94,64 +96,86 @@
   </td></tr>
   {% endif %}
 
-  <!-- Trade Suggestion -->
-  {% if trade %}
+  <!-- Conditional Strategies (new) -->
+  {% if trade_plan and trade_plan.get('strategies') %}
   <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
   <tr><td style="padding:20px 30px">
-    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">交易建议（小亏大赚）</div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:8px;overflow:hidden">
+    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">条件挂单策略（小亏大赚）</div>
+    {% set bias = trade_plan.get('market_bias', 'neutral') %}
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">
+      <span style="display:inline-block;padding:2px 8px;border-radius:3px;background:{{ '#10b98120' if bias == 'bullish' else ('#ef444420' if bias == 'bearish' else '#94a3b820') }};color:{{ '#10b981' if bias == 'bullish' else ('#ef4444' if bias == 'bearish' else '#94a3b8') }};font-weight:600;font-size:11px">
+        {{ trade_plan.get('market_bias_label', '中性') }}
+      </span>
+      {{ trade_plan.get('immediate_action', '') }}
+    </div>
+
+    {% for s in trade_plan.get('strategies', []) %}
+    {% set is_long = 'long' in (s.get('strategy_type', '')) %}
+    {% set border_color = '#10b981' if is_long else '#ef4444' %}
+    {% set rr = s.get('risk_reward', 0) or 0 %}
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:10px;border-left:3px solid {{ border_color }}">
       <tr>
-        <td style="padding:12px 16px;border-bottom:1px solid #1e293b">
-          <span style="font-size:11px;color:#64748b">方向</span><br>
-          <span style="font-size:16px;font-weight:700;color:{{ '#10b981' if trade.direction == 'bullish' else '#ef4444' }}">
-            {{ trade.direction_label }}
-          </span>
-          <span style="font-size:12px;color:#94a3b8;margin-left:8px">{{ trade.position_label }}</span>
+        <td style="padding:10px 14px;border-bottom:1px solid #1e293b">
+          <span style="display:inline-block;padding:2px 10px;border-radius:3px;background:{{ border_color }}20;color:{{ border_color }};font-size:11px;font-weight:700">{{ s.get('label', '') }}</span>
+          <span style="font-size:13px;color:{{ '#10b981' if rr >= 2 else ('#ef4444' if rr < 1.5 else '#94a3b8') }};font-weight:700;font-family:'Courier New',monospace;margin-left:10px">R:R {{ "%.1f"|format(rr) }}:1</span>
+          <span style="font-size:10px;color:#64748b;margin-left:6px">{{ s.get('position_label', '') }}</span>
         </td>
       </tr>
       <tr>
-        <td style="padding:12px 16px;border-bottom:1px solid #1e293b">
+        <td style="padding:10px 14px">
           <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td width="33%" style="vertical-align:top">
-              <span style="font-size:10px;color:#64748b;text-transform:uppercase">入场区间</span><br>
-              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.entry_low) }} — ${{ "%.0f"|format(trade.entry_high) }}</span>
+            <td width="20%" style="vertical-align:top">
+              <span style="font-size:9px;color:#64748b;text-transform:uppercase">挂单价</span><br>
+              <span style="font-size:13px;color:#e2e8f0;font-weight:700;font-family:'Courier New',monospace">${{ "%.0f"|format(s.get('trigger_price', 0) or 0) }}</span>
             </td>
-            <td width="33%" style="vertical-align:top">
-              <span style="font-size:10px;color:#ef4444;text-transform:uppercase">止损</span><br>
-              <span style="font-size:13px;color:#ef4444;font-weight:600;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.stop_loss) }}</span>
+            <td width="20%" style="vertical-align:top">
+              <span style="font-size:9px;color:#64748b;text-transform:uppercase">入场区间</span><br>
+              <span style="font-size:12px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(s.get('entry_low', 0) or 0) }}–${{ "%.0f"|format(s.get('entry_high', 0) or 0) }}</span>
             </td>
-            <td width="33%" style="vertical-align:top;text-align:right">
-              <span style="font-size:10px;color:#10b981;text-transform:uppercase">盈亏比</span><br>
-              <span style="font-size:13px;color:#10b981;font-weight:600;font-family:'Courier New',monospace">{{ "%.1f"|format(trade.risk_reward_1) }}:1 / {{ "%.1f"|format(trade.risk_reward_2) }}:1</span>
+            <td width="20%" style="vertical-align:top">
+              <span style="font-size:9px;color:#ef4444;text-transform:uppercase">止损</span><br>
+              <span style="font-size:13px;color:#ef4444;font-weight:600;font-family:'Courier New',monospace">${{ "%.0f"|format(s.get('stop_loss', 0) or 0) }}</span>
+            </td>
+            <td width="20%" style="vertical-align:top">
+              <span style="font-size:9px;color:#10b981;text-transform:uppercase">止盈</span><br>
+              <span style="font-size:12px;color:#10b981;font-family:'Courier New',monospace">${{ "%.0f"|format(s.get('take_profit_1', 0) or 0) }} / ${{ "%.0f"|format(s.get('take_profit_2', 0) or 0) }}</span>
+            </td>
+            <td width="20%" style="vertical-align:top;text-align:right">
+              <span style="font-size:9px;color:#64748b;text-transform:uppercase">有效期</span><br>
+              <span style="font-size:12px;color:#94a3b8">{{ s.get('valid_hours', 24) }}h</span>
             </td>
           </tr>
           </table>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:12px 16px">
-          <table width="100%" cellpadding="0" cellspacing="0">
-          <tr>
-            <td width="50%" style="vertical-align:top">
-              <span style="font-size:10px;color:#10b981;text-transform:uppercase">保守止盈</span><br>
-              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.take_profit_1) }}</span>
-              <span style="font-size:10px;color:#64748b"> ({{ trade.tp1_source }})</span>
-            </td>
-            <td width="50%" style="vertical-align:top">
-              <span style="font-size:10px;color:#10b981;text-transform:uppercase">激进止盈</span><br>
-              <span style="font-size:13px;color:#e2e8f0;font-family:'Courier New',monospace">${{ "%.0f"|format(trade.take_profit_2) }}</span>
-              {% if trade.tp2_source %}<span style="font-size:10px;color:#64748b"> ({{ trade.tp2_source }})</span>{% endif %}
-            </td>
-          </tr>
-          </table>
+          {% if s.get('invalidation') %}
+          <div style="margin-top:6px;font-size:10px;color:#f59e0b">失效: {{ s.get('invalidation') }}</div>
+          {% endif %}
         </td>
       </tr>
     </table>
-    {% if trade.reasoning %}
-    <div style="margin-top:8px;font-size:12px;color:#94a3b8;padding:8px 12px;border-left:2px solid #00d4ff;background:rgba(0,212,255,0.03)">
-      {{ trade.reasoning }}
+    {% endfor %}
+
+    {% if trade_plan.get('analysis_note') %}
+    <div style="margin-top:4px;font-size:11px;color:#94a3b8;padding:6px 10px;border-left:2px solid #00d4ff;background:rgba(0,212,255,0.03)">
+      {{ trade_plan.get('analysis_note') }}
     </div>
+    {% endif %}
+  </td></tr>
+
+  {% elif trade %}
+  {# 旧版兼容 #}
+  <tr><td style="padding:0 30px"><div style="border-top:1px solid #1e293b"></div></td></tr>
+  <tr><td style="padding:20px 30px">
+    <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">交易建议</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:8px;overflow:hidden">
+      <tr><td style="padding:12px 16px">
+        <span style="font-size:14px;font-weight:700;color:{{ '#10b981' if trade.direction == 'bullish' else '#ef4444' }}">{{ trade.direction_label }}</span>
+        <span style="font-size:12px;color:#94a3b8;margin-left:8px">{{ trade.position_label }}</span>
+        <span style="font-size:12px;color:#64748b;margin-left:12px">R:R {{ "%.1f"|format(trade.risk_reward_1) }}:1</span>
+      </td></tr>
+    </table>
+    {% if trade.reasoning %}
+    <div style="margin-top:6px;font-size:11px;color:#94a3b8;padding:6px 10px;border-left:2px solid #00d4ff">{{ trade.reasoning }}</div>
     {% endif %}
   </td></tr>
   {% endif %}
@@ -171,7 +195,7 @@
   <tr><td style="padding:20px 30px;text-align:center;border-top:1px solid #1e293b">
     <div style="font-size:11px;color:#475569;line-height:1.6">
       CryptoSignal Hub · {{ timestamp }}<br>
-      数据来源 OKX / Binance / Deribit / Yahoo · 仅供参考，不构成投资建议
+      数据来源 OKX / Binance / Deribit / ifnews · 仅供参考，不构成投资建议
     </div>
   </td></tr>
 

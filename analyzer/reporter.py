@@ -15,12 +15,11 @@ from openai import AsyncOpenAI
 
 from config.schema import AIConfig
 from core.interfaces import AIProvider
-from core.models import MarketSnapshot
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是一位专业的加密货币量化分析师，遵循"小亏大赚"交易哲学。
-你的任务是根据多维度市场数据和量化交易建议，生成简洁、准确的交易分析报告。
+你的任务是根据多维度市场数据和条件挂单策略，生成简洁、准确的交易分析报告。
 
 ## 核心规则
 1. 用中文撰写，语言简洁专业
@@ -30,12 +29,14 @@ SYSTEM_PROMPT = """你是一位专业的加密货币量化分析师，遵循"小
 5. 用 ⚠️ 标注风险事件和注意事项
 6. 输出控制在 400-600 字以内
 
-## 交易建议规则（小亏大赚原则）
-- 当系统已给出交易建议时，对其进行解读和补充，说明入场理由
+## 交易建议规则（小亏大赚 + 条件挂单）
+- 系统始终提供 2-3 个条件策略（回调做多/反弹做空/突破追单），不论方向如何
+- 对每个策略进行解读：为什么这个价位值得关注，哪个策略当前最优
 - 止损必须明确，不允许"看情况再说"
-- 盈亏比 < 1.5 的机会必须明确标注为"不建议开仓"
-- 分两档止盈目标：保守（部分止盈）和激进（剩余仓位）
-- 所有价格必须精确到整数位（BTC）或两位小数（其他币种）"""
+- 盈亏比 < 1.5 的策略标注为"盈亏比不足，谨慎操作"
+- 如果所有策略都不达标，明确说"当前不建议开仓，等待更好位置"
+- 说明策略的失效条件（什么情况下该放弃挂单）
+- 所有价格精确到整数位（BTC）或两位小数（其他币种）"""
 
 ANALYSIS_PROMPT_TEMPLATE = """## 当前市场数据
 {snapshot_json}
@@ -43,7 +44,7 @@ ANALYSIS_PROMPT_TEMPLATE = """## 当前市场数据
 ## 评分引擎结果
 {score_summary}
 
-## 量化交易建议
+## 条件挂单策略
 {trade_summary}
 
 ## 请生成分析报告
@@ -51,14 +52,15 @@ ANALYSIS_PROMPT_TEMPLATE = """## 当前市场数据
 1. **总体判断** — 一句话概括当前趋势和信心度
 2. **核心信号** — 最重要的 2-3 个数据点及其意义
 3. **关键价位** — 支撑和阻力，标注数据来源
-4. **交易策略**（基于系统给出的量化建议）
-   - 方向和仓位建议
-   - 入场区间（回调买入 / 反弹做空）
-   - 止损价位和依据
-   - 保守止盈（建议平一半仓位）
-   - 激进止盈（剩余仓位目标）
-   - 盈亏比评估
-   - 如果盈亏比不达标，明确说"当前不建议开仓，等待更好位置"
+4. **交易策略**（基于系统给出的条件挂单策略）
+   - 当前即时建议（应该观望还是可以操作）
+   - 逐一解读每个条件策略：
+     - 策略类型和触发价格
+     - 为什么这个价位值得关注
+     - 入场区间、止损、止盈
+     - 盈亏比评估
+     - 何时该放弃该策略（失效条件）
+   - 综合推荐：当前最优的 1 个策略及理由
 5. **风险提示** — 事件、异常指标、可能导致策略失效的因素"""
 
 
@@ -165,10 +167,15 @@ def build_score_summary(report) -> str:
 
 
 def build_trade_summary(report) -> str:
-    """将 TradeSuggestion 格式化为 AI 可消费的摘要文本。
+    """将 TradePlan 格式化为 AI 可消费的摘要文本。
 
-    返回空字符串表示无建议（中性/盈亏比不足等）。
+    优先使用新版 trade_plan，兼容旧版 trade_suggestion。
     """
+    plan = getattr(report, "trade_plan", None)
+    if plan and plan.strategies:
+        return _format_trade_plan(plan)
+
+    # 旧版兼容
     ts = report.trade_suggestion
     if ts is None:
         return ""
@@ -189,4 +196,39 @@ def build_trade_summary(report) -> str:
         f"盈亏比: 保守 {ts.risk_reward_1:.1f}:1 / 激进 {ts.risk_reward_2:.1f}:1",
         f"综合理由: {ts.reasoning}",
     ]
+    return "\n".join(line for line in lines if line)
+
+
+_BIAS_CN = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
+_SIZE_CN = {"skip": "盈亏比不足", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+
+
+def _format_trade_plan(plan) -> str:
+    """将 TradePlan 格式化为结构化文本。"""
+    bias = _BIAS_CN.get(plan.market_bias.value, "未知")
+    lines = [
+        f"市场偏向: {bias}",
+        f"即时建议: {plan.immediate_action}",
+        "",
+    ]
+
+    for i, s in enumerate(plan.strategies, 1):
+        size_label = _SIZE_CN.get(s.position_size.value, s.position_size.value)
+        lines.extend([
+            f"--- 策略{i}: {s.label} ---",
+            f"  触发/挂单价: ${s.trigger_price:.0f}",
+            f"  入场区间: ${s.entry_low:.0f} - ${s.entry_high:.0f}",
+            f"  止损: ${s.stop_loss:.0f} ({s.sl_source})",
+            f"  保守止盈: ${s.take_profit_1:.0f} ({s.tp1_source})",
+            f"  激进止盈: ${s.take_profit_2:.0f}",
+            f"  盈亏比: {s.risk_reward:.1f}:1 → {size_label}",
+            f"  有效期: {s.valid_hours}小时",
+            f"  失效条件: {s.invalidation}" if s.invalidation else "",
+            f"  理由: {s.reasoning}",
+            "",
+        ])
+
+    if plan.analysis_note:
+        lines.append(f"总体说明: {plan.analysis_note}")
+
     return "\n".join(line for line in lines if line)

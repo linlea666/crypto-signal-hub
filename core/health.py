@@ -107,7 +107,7 @@ class HealthChecker:
             self._probe_exchange(self._exchange_config.primary, "交易所-主"),
             self._probe_exchange(self._exchange_config.secondary, "交易所-辅"),
             self._probe_exchange(self._exchange_config.options_source, "期权数据源"),
-            self._probe_yfinance(),
+            self._probe_ifnews(),
             self._probe_fear_greed(),
             self._probe_ai(),
             self._probe_smtp(),
@@ -179,27 +179,20 @@ class HealthChecker:
                 last_check=now,
             )
 
-    async def _probe_yfinance(self) -> ProbeResult:
-        """探测 yfinance（美股数据）可用性"""
+    async def _probe_ifnews(self) -> ProbeResult:
+        """探测 ifnews 全球股市接口可用性"""
         now = now_beijing().isoformat()
         try:
             start = time.monotonic()
             async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
                 resp = await client.get(
-                    "https://query2.finance.yahoo.com/v8/finance/chart/%5EIXIC?range=1d&interval=1d"
+                    "http://worldmap.ifnews.com/chinamap/china/financialData?type=all"
                 )
-                if resp.status_code == 429:
-                    return ProbeResult(
-                        name="美股数据 (Yahoo)",
-                        status=HealthStatus.DEGRADED,
-                        message="限流中，数据已缓存可用",
-                        last_check=now,
-                    )
                 resp.raise_for_status()
             latency = (time.monotonic() - start) * 1000
             status = HealthStatus.OK if latency < SLOW_THRESHOLD_MS else HealthStatus.DEGRADED
             return ProbeResult(
-                name="美股数据 (Yahoo)",
+                name="全球股市 (ifnews)",
                 status=status,
                 latency_ms=round(latency, 0),
                 message=f"响应 {latency:.0f}ms",
@@ -207,7 +200,7 @@ class HealthChecker:
             )
         except Exception as e:
             return ProbeResult(
-                name="美股数据 (Yahoo)",
+                name="全球股市 (ifnews)",
                 status=HealthStatus.ERROR,
                 message=str(e)[:100],
                 last_check=now,

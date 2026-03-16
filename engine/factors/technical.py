@@ -1,13 +1,14 @@
 """技术面趋势评分因子。
 
-7 个评估维度（总分 ±20，从现有 K 线纯计算，零额外 API）：
+8 个评估维度（总分 ±20，从现有 K 线纯计算，零额外 API）：
 - MA 均线排列与价格位置（±8 分）—— 趋势方向基础
 - RSI 超买超卖（±2 分）—— 动能极端修正
 - K 线结构：高低点趋势（±2 分）—— 价格结构确认
-- VWAP 位置（±2 分）—— 成交量加权公允价
+- VWAP 位置（±1 分）—— 成交量加权公允价
 - 量价配合（±2 分）—— 趋势可信度
 - MACD 动量（±2 分）—— 金叉/死叉 + 零轴位置
 - 布林带位置（±2 分）—— 波动率与价格极端
+- 日线收盘强度（±1 分）—— 趋势确认信号
 """
 
 from core.constants import Direction, FactorName
@@ -78,15 +79,15 @@ class TechnicalFactor(ScoreFactor):
             score -= 2
             details_parts.append("低点递降-2")
 
-        # ── 4. VWAP 位置（±2 分）──
+        # ── 4. VWAP 位置（±1 分）──
         if tech.vwap and price > 0:
             vwap_dist = (price - tech.vwap) / tech.vwap
             if vwap_dist > 0.005:
-                score += 2
-                details_parts.append(f"价格在VWAP上方{vwap_dist:.1%}(+2)")
+                score += 1
+                details_parts.append(f"价格在VWAP上方{vwap_dist:.1%}(+1)")
             elif vwap_dist < -0.005:
-                score -= 2
-                details_parts.append(f"价格在VWAP下方{vwap_dist:.1%}(-2)")
+                score -= 1
+                details_parts.append(f"价格在VWAP下方{vwap_dist:.1%}(-1)")
             else:
                 details_parts.append("价格贴近VWAP")
 
@@ -142,6 +143,18 @@ class TechnicalFactor(ScoreFactor):
                     details_parts.append(f"触及布林下轨%B={bb:.2f}(超卖+1)")
             elif 0.4 <= bb <= 0.6:
                 details_parts.append(f"布林中轨附近%B={bb:.2f}")
+
+        # ── 8. 日线收盘强度（±1 分，趋势确认） ──
+        if tech.daily_close_strength is not None:
+            dcs = tech.daily_close_strength
+            if dcs > 0.7 and ma_direction > 0:
+                score += 1
+                details_parts.append(f"日线收盘偏强{dcs:.2f}(确认多头+1)")
+            elif dcs < 0.3 and ma_direction < 0:
+                score -= 1
+                details_parts.append(f"日线收盘偏弱{dcs:.2f}(确认空头-1)")
+            else:
+                details_parts.append(f"日线收盘强度{dcs:.2f}")
 
         score = max(-self._max, min(self._max, score))
         direction = Direction.BULLISH if score > 0 else (

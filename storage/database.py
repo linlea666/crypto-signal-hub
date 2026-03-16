@@ -112,9 +112,30 @@ class Database:
                     json.dumps(report_data["snapshot"], ensure_ascii=False),
                     json.dumps(report_data["scores"], ensure_ascii=False),
                     json.dumps(report_data["levels"], ensure_ascii=False),
-                    json.dumps(report_data.get("trade") or "", ensure_ascii=False),
+                    json.dumps(
+                        self._build_suggestion_json(report_data),
+                        ensure_ascii=False,
+                    ),
                 ),
             )
+
+    @staticmethod
+    def _build_suggestion_json(report_data: dict) -> dict:
+        """将 trade + trade_plan 合并为统一的 suggestion_json 存储格式。
+
+        兼容旧版回测逻辑（读取 direction / entry_low 等顶层字段）。
+        新版 trade_plan 存储在 `_plan` 子键中。
+        """
+        result: dict = {}
+        trade = report_data.get("trade")
+        if isinstance(trade, dict):
+            result.update(trade)
+
+        plan = report_data.get("trade_plan")
+        if isinstance(plan, dict) and plan.get("strategies"):
+            result["_plan"] = plan
+
+        return result
 
     def mark_email_sent(self, report_id: str) -> None:
         with self._connect() as conn:
@@ -194,26 +215,35 @@ class Database:
 
     @staticmethod
     def _parse_suggestion_json(raw: str) -> dict:
-        """解析 suggestion_json，分离出 trade 建议和回测结果。
+        """解析 suggestion_json，分离出 trade 建议、trade_plan 和回测结果。
 
-        suggestion_json 存储格式示例:
-        {"direction": "bullish", "entry_low": ..., "4h": {"outcome": ...}, ...}
+        suggestion_json 存储格式（兼容新旧两版）：
+        旧版: {"direction": "bullish", "entry_low": ..., "4h": {...}}
+        新版: {"direction": ..., "_plan": {"market_bias": ..., "strategies": [...]}, ...}
 
-        返回 {"trade": {...} or None, "backtest_results": {...}}
+        返回 {"trade": {...} or None, "trade_plan": {...} or None}
         """
         if not raw:
-            return {"trade": None}
+            return {"trade": None, "trade_plan": None}
         try:
             data = json.loads(raw)
             if not isinstance(data, dict):
-                return {"trade": None}
+                return {"trade": None, "trade_plan": None}
         except (json.JSONDecodeError, TypeError):
-            return {"trade": None}
+            return {"trade": None, "trade_plan": None}
 
-        # trade 建议字段标识：含 direction + entry_low
+        result: dict = {"trade": None, "trade_plan": None}
+
+        # 提取 trade_plan（新版）
+        plan = data.pop("_plan", None)
+        if isinstance(plan, dict) and plan.get("strategies"):
+            result["trade_plan"] = plan
+
+        # 旧版 trade 建议字段标识
         if "direction" in data and "entry_low" in data:
-            return {"trade": data}
-        return {"trade": None}
+            result["trade"] = data
+
+        return result
 
     def count_emails_today(self) -> int:
         """统计今日已发送邮件数"""

@@ -255,6 +255,16 @@ class JobScheduler:
         tp1 = suggestion.get("take_profit_1", 0)
         tp2 = suggestion.get("take_profit_2", 0)
 
+        # 新版 TradePlan 降级：旧版字段为空时从 _plan.strategies 提取
+        if not stop_loss and "_plan" in suggestion:
+            strategies = suggestion["_plan"].get("strategies", [])
+            for strat in strategies:
+                if strat.get("position_size") not in (None, "skip"):
+                    stop_loss = strat.get("stop_loss", 0)
+                    tp1 = strat.get("take_profit_1", 0)
+                    tp2 = strat.get("take_profit_2", 0)
+                    break
+
         # 获取信号发出后的 1h K 线（窗口期 = hours_ago 小时）
         since_ts = self._iso_to_ms(signal["timestamp"])
         if not since_ts:
@@ -428,6 +438,7 @@ class JobScheduler:
                     signal_strength=report.signal_strength,
                     key_levels=report.key_levels,
                     trade_suggestion=report.trade_suggestion,
+                    trade_plan=report.trade_plan,
                     ai_analysis=ai_text,
                     alert_type=alert_type,
                 )
@@ -480,6 +491,7 @@ class JobScheduler:
         "round_number": "整数关口",
         "orderbook_bid": "买盘密集区",
         "orderbook_ask": "卖盘密集区",
+        "volume_profile": "成交密集区",
     }
     _STRENGTH_LABELS = {"strong": "强", "medium": "中", "weak": "弱"}
 
@@ -530,11 +542,12 @@ class JobScheduler:
                 "resistances": [_level_dict(lv) for lv in report.key_levels.resistances],
             },
             "trade": JobScheduler._serialize_trade(report.trade_suggestion),
+            "trade_plan": JobScheduler._serialize_trade_plan(report.trade_plan),
         }
 
     @staticmethod
     def _serialize_trade(ts) -> dict | None:
-        """将 TradeSuggestion 序列化为模板可消费的字典"""
+        """将 TradeSuggestion 序列化为模板可消费的字典（旧版兼容）"""
         if ts is None:
             return None
         direction_cn = {"bullish": "做多", "bearish": "做空", "neutral": "观望"}
@@ -555,4 +568,43 @@ class JobScheduler:
             "tp1_source": ts.tp1_source,
             "tp2_source": ts.tp2_source,
             "reasoning": ts.reasoning,
+        }
+
+    @staticmethod
+    def _serialize_trade_plan(plan) -> dict | None:
+        """将 TradePlan 序列化为模板可消费的字典"""
+        if plan is None:
+            return None
+
+        bias_cn = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
+        size_cn = {"skip": "盈亏比不足", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+        sl = JobScheduler._SOURCE_LABELS
+
+        strategies = []
+        for s in plan.strategies:
+            strategies.append({
+                "strategy_type": s.strategy_type,
+                "label": s.label,
+                "trigger_price": s.trigger_price,
+                "entry_low": s.entry_low,
+                "entry_high": s.entry_high,
+                "stop_loss": s.stop_loss,
+                "take_profit_1": s.take_profit_1,
+                "take_profit_2": s.take_profit_2,
+                "risk_reward": s.risk_reward,
+                "position_size": s.position_size.value,
+                "position_label": size_cn.get(s.position_size.value, s.position_size.value),
+                "sl_source": s.sl_source,
+                "tp1_source": sl.get(s.tp1_source, s.tp1_source),
+                "reasoning": s.reasoning,
+                "valid_hours": s.valid_hours,
+                "invalidation": s.invalidation,
+            })
+
+        return {
+            "market_bias": plan.market_bias.value,
+            "market_bias_label": bias_cn.get(plan.market_bias.value, "未知"),
+            "immediate_action": plan.immediate_action,
+            "strategies": strategies,
+            "analysis_note": plan.analysis_note,
         }

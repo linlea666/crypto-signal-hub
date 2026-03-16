@@ -7,6 +7,7 @@
 - 斐波那契回撤位（0.382 / 0.5 / 0.618）
 - 整数心理关口
 - 前期 Swing High / Swing Low
+- Volume Profile 成交密集区（套牢区）
 
 关键位来源越多则强度越高（共振）。
 """
@@ -122,6 +123,21 @@ def identify_key_levels(snapshot: MarketSnapshot) -> KeyLevels:
                     price=opts.max_pain, level_type="resistance",
                     source="max_pain", strength="strong",
                 ))
+
+    # ── Volume Profile 成交密集区（套牢区） ──
+    for vp_price in tech.volume_profile_levels:
+        if abs(vp_price - price) / price < 0.001:
+            continue  # 太接近当前价，无参考意义
+        if vp_price > price * 1.001:
+            resistances.append(KeyLevel(
+                price=vp_price, level_type="resistance",
+                source="volume_profile", strength="medium",
+            ))
+        elif vp_price < price * 0.999:
+            supports.append(KeyLevel(
+                price=vp_price, level_type="support",
+                source="volume_profile", strength="medium",
+            ))
 
     # ── 挂单簿深度密集区 ──
     ob = snapshot.orderbook_clusters

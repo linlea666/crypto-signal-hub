@@ -101,7 +101,6 @@ class ExchangeCollector(DataCollector):
         ex = self._primary
         assert ex is not None
 
-        # 获取 Ticker
         ticker = await ex.fetch_ticker(symbol)
         price = PriceData(
             current=ticker.get("last", 0) or 0,
@@ -111,14 +110,20 @@ class ExchangeCollector(DataCollector):
             volume_24h=ticker.get("quoteVolume", 0) or 0,
         )
 
-        # 获取 4h K 线用于技术分析
-        ohlcv = await ex.fetch_ohlcv(symbol, timeframe="4h", limit=60)
-        technical = self._calculate_technical(ohlcv)
+        # 4h K 线：技术指标 + Volume Profile
+        ohlcv_4h = await ex.fetch_ohlcv(symbol, timeframe="4h", limit=60)
+
+        # 日线 K 线：收盘强度分析（仅需最近 3 根）
+        daily_ohlcv = await ex.fetch_ohlcv(symbol, timeframe="1d", limit=3)
+
+        technical = self._calculate_technical(ohlcv_4h, daily_ohlcv)
 
         return price, technical
 
-    def _calculate_technical(self, ohlcv: list) -> TechnicalData:
-        """基于 K 线数据计算技术指标"""
+    def _calculate_technical(
+        self, ohlcv: list, daily_ohlcv: list | None = None,
+    ) -> TechnicalData:
+        """基于 4h K 线计算技术指标，并整合日线收盘分析和 Volume Profile。"""
         if not ohlcv or len(ohlcv) < 20:
             return TechnicalData()
 
@@ -154,17 +159,16 @@ class ExchangeCollector(DataCollector):
         swing_h = self._find_swing_points(highs.values, mode="high")
         swing_l = self._find_swing_points(lows.values, mode="low")
 
-        # ── VWAP：成交量加权平均价（从 K 线纯计算，无额外 API） ──
         vwap_val = self._calculate_vwap(df)
-
-        # ── 量价比：最近 1 根 K 线量 / 近 20 根均量 ──
         volume_ratio = self._calculate_volume_ratio(df["volume"])
-
-        # ── MACD：动量方向与金叉/死叉（ta 库计算） ──
         macd_hist, macd_cross = self._calculate_macd(close)
-
-        # ── 布林带 %B：价格在带内的位置（ta 库计算） ──
         bb_pct = self._calculate_bollinger(close)
+
+        # ── Volume Profile：从 4h K 线计算成交量分布 ──
+        vp_levels = self._calculate_volume_profile(df)
+
+        # ── 日线收盘分析 ──
+        daily_strength, daily_vs_ma = self._analyze_daily_close(daily_ohlcv, ma20)
 
         return TechnicalData(
             ma20=round(ma20, 2),
@@ -179,6 +183,9 @@ class ExchangeCollector(DataCollector):
             macd_histogram=macd_hist,
             macd_cross=macd_cross,
             bb_percent=bb_pct,
+            daily_close_strength=daily_strength,
+            daily_close_vs_ma20=daily_vs_ma,
+            volume_profile_levels=vp_levels,
         )
 
     @staticmethod
@@ -259,6 +266,107 @@ class ExchangeCollector(DataCollector):
 
         price = close.iloc[-1]
         return round(float((price - lower) / (upper - lower)), 3)
+
+    @staticmethod
+    def _calculate_volume_profile(df: pd.DataFrame) -> list[float]:
+        """简化版 Volume Profile：从 K 线数据计算成交量按价格分布。
+
+        将每根 K 线的成交量均匀分配到其价格范围（OHLC），
+        然后找出成交量最集中的 top 3 价格节点。
+        这些节点近似于"套牢区"——大量交易发生的价格带。
+        """
+        if len(df) < 10:
+            return []
+
+        price_min = df["low"].min()
+        price_max = df["high"].max()
+        if price_max <= price_min:
+            return []
+
+        # 步长 = 价格范围的 0.5%
+        step = price_max * 0.005
+        if step <= 0:
+            return []
+
+        # 构建价格-成交量直方图
+        n_bins = max(1, int((price_max - price_min) / step))
+        if n_bins > 500:
+            n_bins = 500
+            step = (price_max - price_min) / n_bins
+
+        volume_bins = [0.0] * n_bins
+
+        for _, row in df.iterrows():
+            candle_low = row["low"]
+            candle_high = row["high"]
+            candle_vol = row["volume"]
+            if candle_vol <= 0 or candle_high <= candle_low:
+                continue
+
+            # 该 K 线覆盖哪些 bin
+            start_bin = max(0, int((candle_low - price_min) / step))
+            end_bin = min(n_bins - 1, int((candle_high - price_min) / step))
+            n_covered = end_bin - start_bin + 1
+            if n_covered <= 0:
+                continue
+
+            vol_per_bin = candle_vol / n_covered
+            for b in range(start_bin, end_bin + 1):
+                volume_bins[b] += vol_per_bin
+
+        if not any(v > 0 for v in volume_bins):
+            return []
+
+        # 取成交量 top 3 的 bin，转为价格中点
+        avg_vol = sum(volume_bins) / len(volume_bins)
+        indexed = [(i, v) for i, v in enumerate(volume_bins) if v > avg_vol * 1.5]
+        indexed.sort(key=lambda x: x[1], reverse=True)
+
+        result = []
+        for idx, _ in indexed[:3]:
+            price_level = round(price_min + (idx + 0.5) * step, 2)
+            result.append(price_level)
+
+        return sorted(result)
+
+    @staticmethod
+    def _analyze_daily_close(
+        daily_ohlcv: list | None, ma20: float | None,
+    ) -> tuple[float | None, str]:
+        """分析最近日线收盘强度。
+
+        返回 (daily_close_strength, daily_close_vs_ma20):
+        - strength: (close-low)/(high-low)，0~1，>0.7 强势 <0.3 弱势
+        - vs_ma20: 日线收盘相对 4h MA20 的位置
+        """
+        if not daily_ohlcv or len(daily_ohlcv) < 1:
+            return None, "unknown"
+
+        # 取最新完成的日线（如果最后一根未收盘，取倒数第二根）
+        candle = daily_ohlcv[-1]
+        if len(daily_ohlcv) >= 2:
+            candle = daily_ohlcv[-2]  # 倒数第二根是最近完成的日线
+
+        _, open_p, high_p, low_p, close_p, _ = candle[:6]
+
+        # 收盘强度
+        spread = high_p - low_p
+        strength = None
+        if spread > 0:
+            strength = round((close_p - low_p) / spread, 3)
+
+        # 收盘相对 MA20
+        vs_ma = "unknown"
+        if ma20 and ma20 > 0 and close_p > 0:
+            ratio = close_p / ma20
+            if ratio > 1.005:
+                vs_ma = "above"
+            elif ratio < 0.995:
+                vs_ma = "below"
+            else:
+                vs_ma = "near"
+
+        return strength, vs_ma
 
     @staticmethod
     def _find_swing_points(arr, mode="high", window=3):

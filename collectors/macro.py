@@ -1,19 +1,18 @@
 """宏观市场数据采集器。
 
 获取与加密市场高度相关的宏观指标：
-- 纳斯达克 / 标普 500
-- 美元指数 (DXY)
-- VIX 恐慌指数
-- 加密恐惧贪婪指数
-- BTC ETF 资金流（预留接口）
+- 纳斯达克 / 标普 500 / 美元指数 (DXY)  ← ifnews 全球股市接口
+- 加密恐惧贪婪指数                        ← alternative.me
+- BTC ETF 资金流                          ← 预留接口
 
-使用 Yahoo Finance v8 chart API（httpx 直连，无需第三方库）。
-使用 alternative.me API 获取恐惧贪婪指数（免费，无需 Key）。
+数据源选择理由：
+- ifnews 提供全球主要股市指数实时数据，无需认证，无限流限制
+- 替换原 Yahoo Finance v8 API（频繁 429 限流）
+- VIX 改由 BTC 期权 IV_rank 在评分层替代（更贴近加密市场）
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
@@ -24,47 +23,46 @@ from core.models import MacroData
 
 logger = logging.getLogger(__name__)
 
-# Yahoo Finance v8 chart API（直连 httpx，无需 yfinance 库）
-_TICKER_MAP = {
-    "nasdaq": "%5EIXIC",
-    "sp500": "%5EGSPC",
-    "dxy": "DX-Y.NYB",
-    "vix": "%5EVIX",
-}
-
-_YAHOO_CHART_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?range=2d&interval=1d"
-
+IFNEWS_URL = "http://worldmap.ifnews.com/chinamap/china/financialData?type=all"
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 
-# 缓存有效期（秒）：Yahoo 数据刷新慢，缓存 5 分钟避免 429
-_YAHOO_CACHE_TTL = 300
+# ifnews 返回中文 name → 内部名称映射（精确匹配）
+_IFNEWS_NAME_MAP = {
+    "纳斯达克指数": "nasdaq",
+    "标普500指数": "sp500",
+    "美元指数": "dxy",
+}
+
+_CACHE_TTL = 300  # 缓存 5 分钟
 
 
 class MacroCollector(DataCollector):
     """宏观经济数据采集器"""
 
     def __init__(self):
-        self._yahoo_cache: dict[str, dict] = {}
-        self._yahoo_cache_ts: float = 0.0
+        self._ifnews_cache: dict[str, dict] = {}
+        self._ifnews_cache_ts: float = 0.0
 
     @property
     def name(self) -> str:
         return "macro"
 
     async def collect(self, symbol: str, snapshot_data: dict) -> dict:
-        yahoo_data = await self._fetch_all_yahoo()
-        nasdaq = yahoo_data.get("nasdaq", {})
-        dxy = yahoo_data.get("dxy", {})
-        vix = yahoo_data.get("vix", {})
+        indices = await self._fetch_ifnews()
+        nasdaq = indices.get("nasdaq", {})
+        sp500 = indices.get("sp500", {})
+        dxy = indices.get("dxy", {})
         fg = await self._fetch_fear_greed()
         etf_flow = await self._fetch_etf_flow()
 
         snapshot_data["macro"] = MacroData(
             nasdaq_price=nasdaq.get("price"),
             nasdaq_change_pct=nasdaq.get("change_pct", 0),
+            sp500_price=sp500.get("price"),
+            sp500_change_pct=sp500.get("change_pct", 0),
             dxy_price=dxy.get("price"),
             dxy_change_pct=dxy.get("change_pct", 0),
-            vix_value=vix.get("price"),
+            vix_value=None,  # ifnews 不含 VIX，评分层用 BTC IV_rank 替代
             fear_greed_value=fg.get("value"),
             fear_greed_label=fg.get("label", "unknown"),
             btc_etf_flow_usd=etf_flow.get("flow_usd"),
@@ -72,69 +70,63 @@ class MacroCollector(DataCollector):
         )
         return snapshot_data
 
-    async def _fetch_all_yahoo(self) -> dict[str, dict]:
-        """批量获取 Yahoo 数据，带缓存避免 429"""
+    async def _fetch_ifnews(self) -> dict[str, dict]:
+        """从 ifnews 获取全球股市指数，带缓存。
+
+        返回 {"nasdaq": {"price": ..., "change_pct": ...}, "sp500": ..., "dxy": ...}
+        """
         now = time.monotonic()
-        if self._yahoo_cache and (now - self._yahoo_cache_ts) < _YAHOO_CACHE_TTL:
-            logger.debug("使用 Yahoo 缓存数据（%.0f 秒前）", now - self._yahoo_cache_ts)
-            return self._yahoo_cache
+        if self._ifnews_cache and (now - self._ifnews_cache_ts) < _CACHE_TTL:
+            logger.debug("使用 ifnews 缓存数据（%.0f 秒前）", now - self._ifnews_cache_ts)
+            return self._ifnews_cache
 
-        results: dict[str, dict] = {}
-        for key in ("nasdaq", "dxy", "vix"):
-            data = await self._fetch_yahoo_quote(key)
-            results[key] = data
-            await asyncio.sleep(0.5)
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(IFNEWS_URL)
+                resp.raise_for_status()
+                raw_list = resp.json()
 
-        if any(results.values()):
-            self._yahoo_cache = results
-            self._yahoo_cache_ts = now
+            results: dict[str, dict] = {}
+            if not isinstance(raw_list, list):
+                logger.warning("ifnews 返回格式异常: %s", type(raw_list))
+                return results
 
-        return results
-
-    async def _fetch_yahoo_quote(self, key: str, retries: int = 2) -> dict:
-        """通过 Yahoo v8 chart API 直连获取行情（比 yfinance 库更稳定）"""
-        ticker_symbol = _TICKER_MAP.get(key)
-        if not ticker_symbol:
-            return {}
-
-        url = _YAHOO_CHART_URL.format(symbol=ticker_symbol)
-        headers = {"User-Agent": "Mozilla/5.0 CryptoSignalHub/1.0"}
-
-        for attempt in range(retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.get(url, headers=headers)
-                    if resp.status_code == 429 and attempt < retries:
-                        wait = 2 ** (attempt + 1)
-                        logger.info("Yahoo %s 限流，%d 秒后重试...", key, wait)
-                        await asyncio.sleep(wait)
-                        continue
-                    resp.raise_for_status()
-                    data = resp.json()
-
-                result = data.get("chart", {}).get("result", [])
-                if not result:
-                    return {}
-
-                meta = result[0].get("meta", {})
-                price = meta.get("regularMarketPrice")
-                prev = meta.get("chartPreviousClose") or meta.get("previousClose")
-
-                change_pct = 0.0
-                if price and prev and prev > 0:
-                    change_pct = round(((price - prev) / prev) * 100, 2)
-
-                return {
-                    "price": round(price, 2) if price else None,
-                    "change_pct": change_pct,
-                }
-            except Exception as e:
-                if attempt < retries:
-                    await asyncio.sleep(1)
+            for item in raw_list:
+                name = item.get("name", "")
+                internal_name = _IFNEWS_NAME_MAP.get(name)
+                if internal_name is None:
                     continue
-                logger.warning("Yahoo %s 获取失败: %s", key, e)
-                return {}
-        return {}
+
+                price = self._safe_float(item.get("price"))
+                # ifnews 涨跌幅字段为 priceLimit（百分比值）
+                change_pct = self._safe_float(item.get("priceLimit"))
+
+                if price is not None:
+                    results[internal_name] = {
+                        "price": round(price, 2),
+                        "change_pct": round(change_pct, 2) if change_pct is not None else 0.0,
+                    }
+
+            if results:
+                self._ifnews_cache = results
+                self._ifnews_cache_ts = now
+                logger.debug("ifnews 数据更新: %s", list(results.keys()))
+
+            return results
+
+        except Exception as e:
+            logger.warning("ifnews 全球指数获取失败: %s", e)
+            return self._ifnews_cache or {}
+
+    @staticmethod
+    def _safe_float(val) -> float | None:
+        """安全将字符串/数值转为 float，无效值返回 None"""
+        if val is None:
+            return None
+        try:
+            return float(str(val).replace(",", "").replace("%", ""))
+        except (ValueError, TypeError):
+            return None
 
     async def _fetch_fear_greed(self) -> dict:
         """获取加密恐惧贪婪指数"""

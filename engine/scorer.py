@@ -26,7 +26,7 @@ from core.models import (
 )
 from engine.confidence import calculate_confidence
 from engine.levels import identify_key_levels
-from engine.trade_advisor import derive_trade_suggestion
+from engine.trade_advisor import derive_trade_plan, derive_trade_suggestion
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,21 @@ class SignalScorer:
         # 6. 识别关键价位
         key_levels = identify_key_levels(snapshot)
 
-        # 7. 推导交易建议（纯计算，从关键位和方向自动得出）
+        # 7. 推导条件策略计划（始终生成，即使方向中性）
+        trade_plan = derive_trade_plan(
+            direction=direction,
+            confidence=confidence,
+            price=snapshot.price,
+            levels=key_levels,
+        )
+
+        # 旧版兼容：从已计算的 plan 中提取最优策略，避免重复计算
         trade_suggestion = derive_trade_suggestion(
             direction=direction,
             confidence=confidence,
             price=snapshot.price,
             levels=key_levels,
+            plan=trade_plan,
         )
 
         return SignalReport(
@@ -92,6 +101,7 @@ class SignalScorer:
             signal_strength=strength,
             key_levels=key_levels,
             trade_suggestion=trade_suggestion,
+            trade_plan=trade_plan,
         )
 
     def _calculate_all_factors(
