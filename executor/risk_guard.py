@@ -64,14 +64,15 @@ class RiskGuard:
         """
         cfg = self._config
 
-        # 1) 基础档位
+        # 1) 基础档位（skip 标签的限价单策略按 normal 处理）
         size_label = strategy.position_size_label
+        effective_label = "normal" if size_label == "skip" else size_label
         base_pct_map = {
             "light": cfg.light_position_pct,
             "normal": cfg.normal_position_pct,
             "heavy": cfg.heavy_position_pct,
         }
-        base_pct = base_pct_map.get(size_label, cfg.normal_position_pct) / 100.0
+        base_pct = base_pct_map.get(effective_label, cfg.normal_position_pct) / 100.0
         parts = [f"base={size_label}({base_pct*100:.0f}%)"]
 
         if not cfg.enable_dynamic_sizing:
@@ -85,9 +86,12 @@ class RiskGuard:
         conf_factor = max(0.5, min(conf_factor, 1.5))
         parts.append(f"conf={conf:.0f}%({conf_factor:.2f}x)")
 
-        # 3) 盈亏比因子: 1.5->1.0x, 3.0->1.5x
+        # 3) 盈亏比因子
+        # hybrid/限价单模式 R:R 基准 1.0（对应 1.0x），固定模式基准 1.5
         rr = strategy.risk_reward
-        rr_factor = 1.0 + (rr - 1.5) / 1.5 * 0.5
+        tp_mode = getattr(strategy, "tp_mode", "fixed")
+        rr_baseline = 1.0 if tp_mode == "hybrid" else 1.5
+        rr_factor = 1.0 + (rr - rr_baseline) / rr_baseline * 0.5
         rr_factor = max(0.8, min(rr_factor, 1.8))
         parts.append(f"rr={rr:.1f}({rr_factor:.2f}x)")
 

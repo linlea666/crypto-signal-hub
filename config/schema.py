@@ -146,7 +146,7 @@ class ExecutorConfig(BaseModel):
     # 风控参数
     max_positions: int = Field(default=2, ge=1, le=10, description="最大同时持仓数")
     max_position_pct: float = Field(
-        default=10.0, ge=1.0, le=50.0, description="单笔仓位占总权益百分比上限"
+        default=30.0, ge=1.0, le=60.0, description="单笔仓位占总权益百分比上限"
     )
     min_risk_reward: float = Field(
         default=1.5, ge=1.0, le=5.0, description="最低盈亏比门槛"
@@ -166,13 +166,13 @@ class ExecutorConfig(BaseModel):
     )
     # 分级资金分配（基于 PositionSize 档位）
     light_position_pct: float = Field(
-        default=4.0, ge=1.0, le=20.0, description="LIGHT 档仓位占权益 %"
+        default=8.0, ge=1.0, le=30.0, description="LIGHT 档仓位占权益 %"
     )
     normal_position_pct: float = Field(
-        default=7.0, ge=2.0, le=30.0, description="NORMAL 档仓位占权益 %"
+        default=15.0, ge=2.0, le=40.0, description="NORMAL 档仓位占权益 %"
     )
     heavy_position_pct: float = Field(
-        default=11.0, ge=3.0, le=40.0, description="HEAVY 档仓位占权益 %"
+        default=25.0, ge=3.0, le=50.0, description="HEAVY 档仓位占权益 %"
     )
     enable_dynamic_sizing: bool = Field(
         default=True, description="启用动态仓位调节（信心度/盈亏比/市场状态因子）"
