@@ -125,9 +125,19 @@ class ExecutionEngine:
             logger.debug("信心度不足 %.0f < %d，跳过", report.confidence, self._config.min_confidence)
             return
 
-        await self._expire_symbol(symbol)
+        # ── 1. 清理软件 pending 策略（尚未提交到交易所的） ──
+        to_remove = [sid for sid, p in self._pending.items() if p.symbol == symbol]
+        for sid in to_remove:
+            self._pending.pop(sid)
+            self._tracker.update_status(sid, OrderStatus.EXPIRED)
 
-        # 检查该品种已有的 OPEN 持仓方向，避免同方向重复开仓
+        # ── 2. 收集已有限价单信息，按 (symbol, side) 索引 ──
+        existing_limits: dict[str, dict] = {}
+        for sid, info in self._limit_orders.items():
+            if info["symbol"] == symbol:
+                existing_limits[info["side"]] = {"strat_id": sid, **info}
+
+        # ── 3. 检查已有 OPEN 持仓方向 ──
         open_sides = set()
         for o in self._tracker.get_open_orders():
             if o["symbol"] == symbol:
@@ -140,11 +150,37 @@ class ExecutionEngine:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
 
             if side in open_sides:
-                logger.debug(
-                    "跳过 %s %s: 已有同方向持仓",
-                    symbol, s.strategy_type,
-                )
+                logger.debug("跳过 %s %s: 已有同方向持仓", symbol, s.strategy_type)
                 continue
+
+            # ── 限价单智能对比 ──
+            if side in existing_limits:
+                old = existing_limits[side]
+                old_rr = old.get("rr_at_trigger", 0)
+                new_rr = s.rr_at_trigger
+
+                if new_rr > old_rr:
+                    logger.info(
+                        "新信号优于旧限价单 [%s] %s: R:R %.2f→%.2f，替换",
+                        symbol, side, old_rr, new_rr,
+                    )
+                    await self._cancel_limit_order(old["strat_id"], f"新信号R:R更优({old_rr:.2f}→{new_rr:.2f})")
+                    del existing_limits[side]
+                else:
+                    logger.info(
+                        "旧限价单更优 [%s] %s: 旧R:R=%.2f >= 新R:R=%.2f，保留旧单",
+                        symbol, side, old_rr, new_rr,
+                    )
+                    continue
+
+            # ── 反方向：如果新策略方向与旧限价单相反，取消旧单 ──
+            opposite = "sell" if side == "buy" else "buy"
+            if opposite in existing_limits:
+                old_opp = existing_limits.pop(opposite)
+                await self._cancel_limit_order(
+                    old_opp["strat_id"],
+                    f"方向反转({opposite}→{side})",
+                )
 
             if s.position_size.value != "skip":
                 if s.risk_reward < self._config.min_risk_reward:
@@ -322,6 +358,7 @@ class ExecutionEngine:
                 "tp_mode": s.tp_mode,
                 "trailing_callback_pct": s.trailing_callback_pct,
                 "tp1_close_ratio": s.tp1_close_ratio,
+                "rr_at_trigger": s.rr_at_trigger,
             }
             logger.info(
                 "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R@trigger=%.2f",
@@ -622,6 +659,7 @@ class ExecutionEngine:
                     "tp_mode": order.get("tp_mode", "hybrid"),
                     "trailing_callback_pct": order.get("trailing_callback_pct", 1.0),
                     "tp1_close_ratio": order.get("tp1_close_ratio", 0.5),
+                    "rr_at_trigger": order.get("risk_reward", 0),
                 }
                 logger.info("恢复限价单(仍挂出) [%s] eid=%s", symbol, eid[:12])
             else:
