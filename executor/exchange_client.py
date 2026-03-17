@@ -360,11 +360,12 @@ class ExchangeClient:
         return f"{base}-USDT-SWAP"
 
     async def set_take_profit(
-        self, symbol: str, side: str, tp_price: float, close_ratio: float = 1.0,
+        self, symbol: str, side: str, tp_price: float, quantity: float = 0,
     ) -> bool:
-        """为已有持仓设置止盈算法单（OKX conditional order）
+        """为已有持仓设置止盈算法单（OKX conditional order）。
 
-        close_ratio < 1.0 时为部分止盈（closeFraction）。
+        quantity: 要平仓的精确数量（张数），由调用方根据 close_ratio 计算好传入。
+        quantity=0 时自动查询持仓全平。
         """
         if not self._exchange:
             return False
@@ -372,31 +373,49 @@ class ExchangeClient:
         pos_side = "long" if side == "buy" else "short"
         close_side = "sell" if side == "buy" else "buy"
 
+        close_sz = quantity
+        if close_sz <= 0:
+            close_sz = await self._get_position_contracts(symbol, pos_side)
+            if close_sz <= 0:
+                logger.warning("设置止盈失败 %s: 无法获取持仓数量", symbol)
+                return False
+
         params: dict = {
             "instId": inst_id,
             "tdMode": "cross",
             "side": close_side,
             "posSide": pos_side,
             "ordType": "conditional",
+            "sz": str(close_sz),
             "tpTriggerPx": str(tp_price),
             "tpOrdPx": "-1",
         }
 
-        if 0 < close_ratio < 1.0:
-            params["closeFraction"] = str(round(close_ratio, 2))
-        else:
-            params["closeFraction"] = "1"
-
         try:
             await self._exchange.private_post_trade_order_algo(params)
             logger.info(
-                "设置止盈成功 %s %s TP=%.2f (平%.0f%%)",
-                symbol, pos_side, tp_price, close_ratio * 100,
+                "设置止盈成功 %s %s TP=%.2f sz=%.4f",
+                symbol, pos_side, tp_price, close_sz,
             )
             return True
         except Exception as e:
             logger.warning("设置止盈失败 %s: %s", symbol, e)
             return False
+
+    async def _get_position_contracts(self, symbol: str, pos_side: str) -> float:
+        """获取指定方向的持仓张数。"""
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
+        try:
+            positions = await self._exchange.fetch_positions([swap_symbol])
+            pos = next(
+                (p for p in positions
+                 if p["side"] == pos_side and float(p.get("contracts", 0) or 0) > 0),
+                None,
+            )
+            return float(pos["contracts"]) if pos else 0
+        except Exception as e:
+            logger.debug("获取持仓数量失败 %s: %s", symbol, e)
+            return 0
 
     async def get_recent_fills(self, symbol: str, limit: int = 10) -> list[dict]:
         """获取最近成交记录，用于确定实际平仓价格。"""

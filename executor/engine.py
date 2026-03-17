@@ -186,7 +186,11 @@ class ExecutionEngine:
                     placed_sides.add(side)
                     continue
 
-            # ── 反方向：取消对侧旧限价单 ──
+            effective_rr = max(s.risk_reward, s.rr_at_trigger)
+            if effective_rr < MIN_RISK_REWARD_HYBRID:
+                continue
+
+            # ── 反方向：R:R 达标后才取消对侧旧限价单 ──
             opposite = "sell" if side == "buy" else "buy"
             if opposite in existing_limits:
                 old_opp = existing_limits.pop(opposite)
@@ -194,10 +198,6 @@ class ExecutionEngine:
                     old_opp["strat_id"],
                     f"方向反转({opposite}→{side})",
                 )
-
-            effective_rr = max(s.risk_reward, s.rr_at_trigger)
-            if effective_rr < MIN_RISK_REWARD_HYBRID:
-                continue
 
             if self._config.enable_limit_orders:
                 ok = await self._place_limit_order(s, report, side, now)
@@ -606,20 +606,22 @@ class ExecutionEngine:
         side = info["side"]
         tp_mode = info.get("tp_mode", "hybrid")
         close_ratio = info.get("tp1_close_ratio", 0.5)
+        qty = order.get("quantity", 0) or 0
 
-        if tp_mode == "hybrid":
-            ok = await self._client.set_take_profit(
-                symbol, side, tp1, close_ratio=close_ratio,
-            )
+        if tp_mode == "hybrid" and qty > 0:
+            close_qty = round(qty * close_ratio, 6)
         else:
-            ok = await self._client.set_take_profit(
-                symbol, side, tp1, close_ratio=1.0,
-            )
+            close_qty = 0
 
+        ok = await self._client.set_take_profit(
+            symbol, side, tp1, quantity=close_qty,
+        )
+
+        pct = close_ratio * 100 if tp_mode == "hybrid" else 100
         if ok:
             logger.info(
-                "限价单成交后设置TP1 [%s] %s TP=%.2f (平%.0f%%)",
-                symbol, side, tp1, (close_ratio if tp_mode == "hybrid" else 1.0) * 100,
+                "限价单成交后设置TP1 [%s] %s TP=%.2f (平%.0f%% qty=%.4f)",
+                symbol, side, tp1, pct, close_qty or qty,
             )
         else:
             logger.warning(
