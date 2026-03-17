@@ -112,6 +112,17 @@ async def executor_page(request: Request):
         except Exception:
             pass
 
+    tracked_keys = set()
+    for o in active_orders:
+        if o.get("status") == "open":
+            sym = o["symbol"].replace("/USDT", "/USDT:USDT")
+            side = "long" if o.get("side") == "buy" else "short"
+            tracked_keys.add((sym, side))
+
+    for p in positions:
+        key = (p["symbol"], p["side"])
+        p["tracked"] = key in tracked_keys
+
     return request.app.state.templates.TemplateResponse("executor.html", {
         "request": request,
         "config": config,

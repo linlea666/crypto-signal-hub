@@ -710,33 +710,39 @@ class ExecutionEngine:
                 await self._close_order_by_market(order)
 
     async def _close_order_by_market(self, order: dict) -> None:
-        """交易所持仓已消失（SL/TP 被触发），更新本地状态"""
+        """交易所持仓已消失（SL/TP 被触发），基于阶段和成交记录判定平仓原因。"""
         now_iso = now_beijing().isoformat()
-        market_price = await self._client.get_market_price(order["symbol"])
-
         entry = order.get("entry_price", 0) or 0
         sl = order.get("stop_loss", 0) or 0
         tp1 = order.get("take_profit_1", 0) or 0
+        tp1_triggered = bool(order.get("tp1_triggered_at"))
+        is_long = order["side"] == "buy"
+
+        close_price = await self._get_actual_close_price(order)
 
         if entry <= 0:
             status = OrderStatus.CLOSED_MANUAL
-            pnl_pct = 0.0
-        elif order["side"] == "buy":
-            if market_price <= sl * 1.005:
+        elif tp1_triggered:
+            status = OrderStatus.CLOSED_TP2
+        elif is_long:
+            if close_price <= sl * 1.005:
                 status = OrderStatus.CLOSED_SL
-            elif market_price >= tp1 * 0.995:
+            elif close_price >= tp1 * 0.995:
                 status = OrderStatus.CLOSED_TP1
             else:
                 status = OrderStatus.CLOSED_MANUAL
-            pnl_pct = (market_price - entry) / entry * 100
         else:
-            if market_price >= sl * 0.995:
+            if close_price >= sl * 0.995:
                 status = OrderStatus.CLOSED_SL
-            elif market_price <= tp1 * 1.005:
+            elif close_price <= tp1 * 1.005:
                 status = OrderStatus.CLOSED_TP1
             else:
                 status = OrderStatus.CLOSED_MANUAL
-            pnl_pct = (entry - market_price) / entry * 100
+
+        if entry > 0:
+            pnl_pct = ((close_price - entry) / entry * 100) if is_long else ((entry - close_price) / entry * 100)
+        else:
+            pnl_pct = 0.0
 
         qty = order.get("quantity", 0) or 0
         pnl_usd = qty * entry * (pnl_pct / 100) if entry > 0 else 0
@@ -746,20 +752,37 @@ class ExecutionEngine:
             order["id"], status,
             pnl_usd=round(pnl_usd, 2),
             pnl_pct=round(pnl_pct, 2),
+            close_price=round(close_price, 2),
             closed_at=now_iso,
         )
         self._tracker.update_daily_stats(pnl_usd, won)
         self._guard.record_pnl(pnl_usd)
 
         label = status.value.replace("closed_", "").upper()
+        phase = "移动止盈阶段" if tp1_triggered else "TP1前阶段"
         logger.info(
-            "平仓检测 [%s] %s %s → %s | PnL: $%.2f (%.2f%%)",
+            "平仓确认 [%s] %s %s → %s (%s) | 平仓价=%.2f 入场价=%.2f SL=%.2f | PnL: $%.2f (%.2f%%)",
             order["symbol"], order["strategy_type"], order["side"],
-            label, pnl_usd, pnl_pct,
+            label, phase, close_price, entry, sl, pnl_usd, pnl_pct,
         )
 
         if self._config.enable_signal_export:
             self._auto_archive_trade(order["id"])
+
+    async def _get_actual_close_price(self, order: dict) -> float:
+        """尝试从交易所成交记录获取实际平仓价，回退到当前市场价。"""
+        try:
+            fills = await self._client.get_recent_fills(order["symbol"], limit=10)
+            if fills:
+                close_side = "sell" if order["side"] == "buy" else "buy"
+                close_fills = [f for f in fills if f["side"] == close_side]
+                if close_fills:
+                    latest = max(close_fills, key=lambda f: f["timestamp"])
+                    return latest["price"]
+        except Exception as e:
+            logger.debug("获取平仓成交价失败 %s: %s", order["symbol"], e)
+
+        return await self._client.get_market_price(order["symbol"])
 
     # ── 信号存档 ──
 
@@ -895,9 +918,12 @@ class ExecutionEngine:
                     highest_price=extreme,
                     trailing_sl=new_sl,
                 )
+                pnl_at_tp1 = ((price - entry) / entry * 100) if is_long else ((entry - price) / entry * 100)
                 logger.info(
-                    "TP1触发 [%s] %s: SL→%.2f(盈亏平衡), 极值=%.2f, tp_mode=%s",
-                    order["symbol"], side, new_sl, extreme, tp_mode,
+                    "TP1触发 [%s] %s: 当前价=%.2f, 入场=%.2f, 浮盈=%.2f%% | "
+                    "SL→%.2f(盈亏平衡) | TP1由交易所algo平%.0f%%, 剩余走移动止盈(回调%.1f%%)",
+                    order["symbol"], side, price, entry, pnl_at_tp1,
+                    new_sl, close_ratio * 100, callback_pct,
                 )
                 continue
 
@@ -917,6 +943,8 @@ class ExecutionEngine:
                     or (not is_long and (current_trail_sl == 0 or trail_sl < current_trail_sl))
                 )
 
+                pnl_now = ((price - entry) / entry * 100) if is_long else ((entry - price) / entry * 100)
+
                 if sl_improved:
                     await self._amend_sl_on_exchange(order, trail_sl)
                     self._tracker.update_status(
@@ -926,8 +954,9 @@ class ExecutionEngine:
                         stop_loss=round(trail_sl, 2),
                     )
                     logger.info(
-                        "移动止盈更新 [%s] %s: 极值%.2f→%.2f, SL %.2f→%.2f",
-                        order["symbol"], side,
+                        "移动止盈更新 [%s] %s: 当前价=%.2f(浮盈%.2f%%) | "
+                        "极值%.2f→%.2f, SL %.2f→%.2f",
+                        order["symbol"], side, price, pnl_now,
                         highest, new_highest,
                         current_trail_sl, trail_sl,
                     )
@@ -968,6 +997,7 @@ class ExecutionEngine:
                 "方向": "多" if o.get("side") == "buy" else "空",
                 "状态": o.get("status", ""),
                 "入场价": o.get("entry_price", 0),
+                "平仓价": o.get("close_price", 0),
                 "止损": o.get("stop_loss", 0),
                 "止盈": o.get("take_profit_1", 0),
                 "盈亏比": o.get("risk_reward", 0),

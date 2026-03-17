@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS executor_orders (
     triggered_at TEXT DEFAULT '',
     opened_at TEXT DEFAULT '',
     closed_at TEXT DEFAULT '',
+    close_price REAL DEFAULT 0,
     tp_mode TEXT DEFAULT 'hybrid',
     trailing_callback_pct REAL DEFAULT 1.0,
     tp1_close_ratio REAL DEFAULT 0.5,
@@ -80,6 +81,7 @@ class PositionTracker:
         ("highest_price", "REAL DEFAULT 0"),
         ("trailing_sl", "REAL DEFAULT 0"),
         ("tp1_triggered_at", "TEXT DEFAULT ''"),
+        ("close_price", "REAL DEFAULT 0"),
     ]
 
     def _init_schema(self) -> None:
@@ -137,7 +139,7 @@ class PositionTracker:
         "entry_price", "stop_loss", "take_profit_1", "take_profit_2",
         "quantity", "leverage", "exchange_order_id", "risk_reward",
         "pnl_usd", "pnl_pct", "reject_reason",
-        "triggered_at", "opened_at", "closed_at",
+        "triggered_at", "opened_at", "closed_at", "close_price",
         "tp_mode", "trailing_callback_pct", "tp1_close_ratio",
         "highest_price", "trailing_sl", "tp1_triggered_at",
     })

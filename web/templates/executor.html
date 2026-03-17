@@ -109,8 +109,13 @@
           </tr></thead>
           <tbody>
             {% for p in positions %}
-            <tr>
-              <td class="mono">{{ p.symbol }}</td>
+            <tr{% if not p.get('tracked', false) %} style="opacity:0.7"{% endif %}>
+              <td class="mono">
+                {{ p.symbol }}
+                {% if not p.get('tracked', false) %}
+                <span class="signal-badge weak" style="font-size:9px;padding:1px 5px;margin-left:4px" title="此仓位非系统开仓，未被追踪">未追踪</span>
+                {% endif %}
+              </td>
               <td><span class="direction-tag dir-{{ p.side }}">{{ '多' if p.side=='long' else '空' }}</span></td>
               <td class="mono">{{ "%.4f"|format(p.contracts) }}</td>
               <td class="mono">${{ "%.2f"|format(p.entryPrice) }}</td>
@@ -176,7 +181,7 @@
       <table class="executor-table">
         <thead><tr>
           <th>时间</th><th>交易对</th><th>策略</th><th>方向</th>
-          <th>结果</th><th>入场价</th><th>盈亏</th><th>盈亏%</th>
+          <th>结果</th><th>入场价</th><th>平仓价</th><th>盈亏</th><th>盈亏%</th>
         </tr></thead>
         <tbody>
           {% for o in history %}
@@ -185,9 +190,10 @@
             <td class="mono">{{ o.symbol }}</td>
             <td>{{ o.strategy_type }}</td>
             <td><span class="direction-tag dir-{{ 'long' if o.side=='buy' else 'short' }}">{{ '多' if o.side=='buy' else '空' }}</span></td>
-            {% set status_cn = {'pending':'待触发','limit_pending':'限价挂单','triggered':'触发中','open':'持仓中','closed_tp1':'止盈','closed_tp2':'止盈2','closed_sl':'止损','closed_manual':'手动平仓','expired':'已过期','failed':'失败','cancelled':'已取消','limit_cancelled':'限价取消'} %}
+            {% set status_cn = {'pending':'待触发','limit_pending':'限价挂单','triggered':'触发中','open':'持仓中','closed_tp1':'止盈1','closed_tp2':'移动止盈','closed_sl':'止损','closed_manual':'手动平仓','expired':'已过期','failed':'失败','cancelled':'已取消','limit_cancelled':'限价取消'} %}
             <td><span class="order-status status-{{ o.status }}">{{ status_cn.get(o.status, o.status) }}</span></td>
             <td class="mono">${{ "%.0f"|format(o.entry_price) if o.entry_price else '-' }}</td>
+            <td class="mono">${{ "%.0f"|format(o.close_price) if o.get('close_price') else '-' }}</td>
             <td class="mono {{ 'text-bullish' if (o.pnl_usd or 0) >= 0 else 'text-bearish' }}">
               {{ "$%.2f"|format(o.pnl_usd) if o.pnl_usd else '-' }}
             </td>

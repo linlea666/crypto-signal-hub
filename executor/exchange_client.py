@@ -398,6 +398,28 @@ class ExchangeClient:
             logger.warning("设置止盈失败 %s: %s", symbol, e)
             return False
 
+    async def get_recent_fills(self, symbol: str, limit: int = 10) -> list[dict]:
+        """获取最近成交记录，用于确定实际平仓价格。"""
+        if not self._exchange:
+            return []
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
+        try:
+            trades = await self._exchange.fetch_my_trades(swap_symbol, limit=limit)
+            return [
+                {
+                    "price": float(t.get("price", 0) or 0),
+                    "amount": float(t.get("amount", 0) or 0),
+                    "side": t.get("side", ""),
+                    "timestamp": t.get("timestamp", 0),
+                    "datetime": t.get("datetime", ""),
+                    "fee": t.get("fee", {}),
+                }
+                for t in trades
+            ]
+        except Exception as e:
+            logger.debug("获取成交记录失败 %s: %s", symbol, e)
+            return []
+
     async def get_min_order_amount(self, symbol: str) -> float:
         """获取最小下单数量"""
         if not self._exchange:
