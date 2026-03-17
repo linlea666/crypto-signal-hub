@@ -468,7 +468,8 @@
     <!-- 回测统计 -->
     <div class="card card-sm">
         <div class="card-title"><span>回测统计 (7日)</span></div>
-        {% if backtest and backtest.get('summary', {}).get('verified', 0) > 0 %}
+        {% set has_backtest = backtest and (backtest.get('summary', {}).get('verified', 0) > 0 or backtest.get('by_strength', {}).get('strong', {}).get('verified', 0) > 0) %}
+        {% if has_backtest %}
         <div class="backtest-grid">
             {% for win in ['4h', '12h', '24h'] %}
             {% set w = backtest.get(win, {}) %}
@@ -484,6 +485,30 @@
             </div>
             {% endfor %}
         </div>
+        {% set bs = backtest.get('by_strength', {}) %}
+        {% if bs.get('strong', {}).get('verified', 0) > 0 or bs.get('moderate', {}).get('verified', 0) > 0 %}
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+            <div class="strip-meta" style="margin-bottom:6px;font-weight:600">按信号强度</div>
+            <div class="backtest-grid">
+                {% set sg = bs.get('strong', {}) %}
+                <div class="backtest-window">
+                    <div class="backtest-label">🔴 强信号</div>
+                    <div class="backtest-rate mono {{ 'text-bullish' if sg.get('rate', 0) >= 60 else ('text-bearish' if sg.get('rate', 0) < 40 else '') }}">
+                        {{ "%.0f"|format(sg.get('rate', 0)) }}%
+                    </div>
+                    <div class="strip-meta">{{ sg.get('verified', 0) }}条 / {{ sg.get('correct', 0) }}正确</div>
+                </div>
+                {% set md = bs.get('moderate', {}) %}
+                <div class="backtest-window">
+                    <div class="backtest-label">🟡 中等信号</div>
+                    <div class="backtest-rate mono {{ 'text-bullish' if md.get('rate', 0) >= 60 else ('text-bearish' if md.get('rate', 0) < 40 else '') }}">
+                        {{ "%.0f"|format(md.get('rate', 0)) }}%
+                    </div>
+                    <div class="strip-meta">{{ md.get('verified', 0) }}条 / {{ md.get('correct', 0) }}正确</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
         {% else %}
         <div class="strip-meta" style="padding:16px;text-align:center">暂无回测数据</div>
         {% endif %}

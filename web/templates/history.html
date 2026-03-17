@@ -30,7 +30,13 @@
 
 <!-- Reports Table -->
 <div class="card" style="margin-top:12px">
-    <div class="card-title">历史记录</div>
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>历史记录</span>
+        <div style="display:flex;gap:8px">
+            <button onclick="exportSignals('json')" class="btn btn-sm" title="导出基础 JSON">导出 JSON</button>
+            <button onclick="exportSignals('full')" class="btn btn-sm btn-primary" title="导出完整数据（含 snapshot/策略/回测，供 AI 分析）">导出完整 JSON</button>
+        </div>
+    </div>
     <div style="overflow-x:auto">
         <table class="data-table">
             <thead>
@@ -71,4 +77,29 @@
         </table>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function exportSignals(mode) {
+    const url = mode === 'full' ? '/api/export/signals-full' : '/api/export/signals?fmt=json';
+    const filename = mode === 'full'
+        ? `signals-full-${new Date().toISOString().slice(0,10)}.json`
+        : `signals-${new Date().toISOString().slice(0,10)}.json`;
+
+    fetch(url)
+        .then(r => {
+            if (!r.ok) throw new Error('Export failed');
+            return r.blob();
+        })
+        .then(blob => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(e => alert('导出失败: ' + e.message));
+}
+</script>
 {% endblock %}

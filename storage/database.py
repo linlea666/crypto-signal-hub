@@ -379,6 +379,10 @@ class Database:
             for win in ("4h", "12h", "24h"):
                 result[win] = self._calc_window_accuracy(conn, win, days, symbol)
             result["summary"] = self._calculate_accuracy(conn, days, symbol)
+            result["by_strength"] = {
+                "strong": self._calc_strength_accuracy(conn, "strong", days, symbol),
+                "moderate": self._calc_strength_accuracy(conn, "moderate", days, symbol),
+            }
             return result
 
     @staticmethod
@@ -444,3 +448,96 @@ class Database:
             "correct": correct,
             "rate": round((correct / total * 100), 1) if total > 0 else 0,
         }
+
+    @staticmethod
+    def _calc_strength_accuracy(
+        conn, strength: str, days: int, symbol: str = "",
+    ) -> dict:
+        """按信号强度统计准确率（取最长可用窗口）"""
+        query = """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE
+                    WHEN json_extract(suggestion_json, '$.24h.correct') = 1 THEN 1
+                    WHEN json_extract(suggestion_json, '$.24h') IS NULL
+                         AND json_extract(suggestion_json, '$.12h.correct') = 1 THEN 1
+                    WHEN json_extract(suggestion_json, '$.24h') IS NULL
+                         AND json_extract(suggestion_json, '$.12h') IS NULL
+                         AND json_extract(suggestion_json, '$.4h.correct') = 1 THEN 1
+                    ELSE 0
+                END) as correct_cnt
+            FROM signal_reports
+            WHERE signal_strength = ?
+            AND timestamp >= date('now', ?)
+            AND (json_extract(suggestion_json, '$.4h') IS NOT NULL
+                 OR json_extract(suggestion_json, '$.12h') IS NOT NULL
+                 OR json_extract(suggestion_json, '$.24h') IS NOT NULL)
+        """
+        params: list = [strength, f"-{days} days"]
+        if symbol:
+            query += " AND symbol = ?"
+            params.append(symbol)
+        row = conn.execute(query, params).fetchone()
+        total = row["total"] if row else 0
+        correct = row["correct_cnt"] if row else 0
+        return {
+            "verified": total,
+            "correct": correct,
+            "rate": round((correct / total * 100), 1) if total > 0 else 0,
+        }
+
+    def get_full_reports_for_export(
+        self, limit: int = 500, symbol: str = "",
+    ) -> list[dict]:
+        """导出完整信号报告（含 snapshot、scores、strategies、回测结果），供 AI 分析。"""
+        with self._connect() as conn:
+            query = """
+                SELECT id, timestamp, symbol, total_score, max_score,
+                       direction, confidence, signal_strength, alert_type,
+                       market_state, trigger_reason,
+                       snapshot_json, scores_json, levels_json, suggestion_json
+                FROM signal_reports
+            """
+            params: list = []
+            if symbol:
+                query += " WHERE symbol = ?"
+                params.append(symbol)
+            query += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for row in rows:
+                item = dict(row)
+                for json_field in ("snapshot_json", "scores_json", "levels_json"):
+                    raw = item.pop(json_field, "")
+                    key = json_field.replace("_json", "")
+                    try:
+                        item[key] = json.loads(raw) if raw else None
+                    except (json.JSONDecodeError, TypeError):
+                        item[key] = None
+
+                sug_raw = item.pop("suggestion_json", "")
+                try:
+                    sug = json.loads(sug_raw) if sug_raw else {}
+                    if not isinstance(sug, dict):
+                        sug = {}
+                except (json.JSONDecodeError, TypeError):
+                    sug = {}
+
+                plan = sug.pop("_plan", None)
+                item["trade_plan"] = plan
+
+                backtest = {}
+                for win in ("4h", "12h", "24h"):
+                    if win in sug:
+                        backtest[win] = sug.pop(win)
+                item["backtest"] = backtest if backtest else None
+
+                if any(k in sug for k in ("direction", "entry_low")):
+                    item["trade"] = sug
+                else:
+                    item["trade"] = None
+
+                results.append(item)
+            return results

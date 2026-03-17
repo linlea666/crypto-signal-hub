@@ -421,10 +421,14 @@ class JobScheduler:
 
     @staticmethod
     def _extract_plan_strategies(suggestion: dict) -> list[dict]:
-        """从 suggestion_json 中提取 trade_plan 的策略列表。"""
+        """从 suggestion_json 中提取 trade_plan 的策略列表。
+
+        包含所有有 trigger_price 的策略（含 skip），因为限价单场景下
+        skip 策略（rr_at_trigger 达标）也会实际执行。
+        """
         plan = suggestion.get("_plan", {})
         strategies = plan.get("strategies", [])
-        return [s for s in strategies if s.get("position_size") not in (None, "skip")]
+        return [s for s in strategies if s.get("trigger_price")]
 
     @staticmethod
     def _evaluate_two_stage(

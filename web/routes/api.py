@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -443,6 +444,28 @@ async def export_signals(request: Request, days: int = 7, fmt: str = "json"):
             headers={"Content-Disposition": "attachment; filename=signals.csv"},
         )
     return reports
+
+
+@router.get("/export/signals-full")
+async def export_signals_full(
+    request: Request, limit: int = 500, symbol: str = "",
+):
+    """导出完整信号报告（含 snapshot/scores/levels/trade_plan/回测），供 AI 分析。"""
+    from fastapi.responses import StreamingResponse
+
+    db = request.app.state.db
+    data = db.get_full_reports_for_export(limit=limit, symbol=symbol)
+    if not data:
+        return JSONResponse({"error": "暂无数据"}, status_code=404)
+
+    output = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+    return StreamingResponse(
+        iter([output]),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": "attachment; filename=signals-full.json",
+        },
+    )
 
 
 @router.get("/export/trades")
