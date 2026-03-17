@@ -205,6 +205,7 @@ def _build_pullback_long(
         invalidation=invalidation,
         tp_mode="hybrid",
         rr_at_trigger=rr_trigger,
+        trigger_strength=trigger_level.strength,
     )
 
 
@@ -262,6 +263,7 @@ def _build_bounce_short(
         invalidation=invalidation,
         tp_mode="hybrid",
         rr_at_trigger=rr_trigger,
+        trigger_strength=trigger_level.strength,
     )
 
 
@@ -311,6 +313,7 @@ def _build_breakout_long(
         invalidation=invalidation,
         tp_mode="hybrid",
         rr_at_trigger=rr_fixed,
+        trigger_strength=target_level.strength,
     )
 
 
@@ -360,6 +363,7 @@ def _build_breakout_short(
         invalidation=invalidation,
         tp_mode="hybrid",
         rr_at_trigger=rr_fixed,
+        trigger_strength=target_level.strength,
     )
 
 

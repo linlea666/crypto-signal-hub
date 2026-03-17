@@ -316,10 +316,9 @@ class ExchangeClient:
         """获取当前生效的 SL/TP 算法单"""
         if not self._exchange:
             return []
-        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
         try:
             response = await self._exchange.private_get_trade_orders_algo_pending({
-                "instId": swap_symbol.replace("/", "-"),
+                "instId": self._to_okx_inst_id(symbol),
                 "ordType": "conditional",
             })
             data = response.get("data", [])
@@ -343,10 +342,9 @@ class ExchangeClient:
         """修改止损价格（OKX amendAlgoOrder）"""
         if not self._exchange:
             return False
-        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
         try:
             await self._exchange.private_post_trade_amend_algos({
-                "instId": swap_symbol.replace("/", "-"),
+                "instId": self._to_okx_inst_id(symbol),
                 "algoId": algo_id,
                 "newSlTriggerPx": str(new_sl),
             })
@@ -355,6 +353,11 @@ class ExchangeClient:
         except Exception as e:
             logger.warning("修改止损失败 %s: %s", symbol, e)
             return False
+
+    def _to_okx_inst_id(self, symbol: str) -> str:
+        """统一转换为 OKX instId 格式: BTC/USDT → BTC-USDT-SWAP"""
+        base = symbol.replace("/USDT", "").replace(":USDT", "")
+        return f"{base}-USDT-SWAP"
 
     async def set_take_profit(
         self, symbol: str, side: str, tp_price: float, close_ratio: float = 1.0,
@@ -365,8 +368,7 @@ class ExchangeClient:
         """
         if not self._exchange:
             return False
-        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
-        inst_id = swap_symbol.replace("/", "-")
+        inst_id = self._to_okx_inst_id(symbol)
         pos_side = "long" if side == "buy" else "short"
         close_side = "sell" if side == "buy" else "buy"
 

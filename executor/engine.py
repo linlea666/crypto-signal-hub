@@ -150,7 +150,7 @@ class ExecutionEngine:
         best_new: dict[str, float] = {}
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
-            rr = s.rr_at_trigger if s.position_size.value == "skip" else s.risk_reward
+            rr = max(s.risk_reward, s.rr_at_trigger)
             if side not in best_new or rr > best_new[side]:
                 best_new[side] = rr
 
@@ -195,19 +195,21 @@ class ExecutionEngine:
                     f"方向反转({opposite}→{side})",
                 )
 
-            if s.position_size.value != "skip":
+            effective_rr = max(s.risk_reward, s.rr_at_trigger)
+            if effective_rr < MIN_RISK_REWARD_HYBRID:
+                continue
+
+            if self._config.enable_limit_orders:
+                ok = await self._place_limit_order(s, report, side, now)
+                if ok:
+                    registered += 1
+                    placed_sides.add(side)
+            else:
                 if s.risk_reward < self._config.min_risk_reward:
                     continue
                 self._register_pending(s, report, side, now)
                 registered += 1
                 placed_sides.add(side)
-
-            elif (self._config.enable_limit_orders
-                  and s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID):
-                ok = await self._place_limit_order(s, report, side, now)
-                if ok:
-                    registered += 1
-                    placed_sides.add(side)
 
         if registered:
             logger.info(
@@ -287,8 +289,9 @@ class ExecutionEngine:
     async def _place_limit_order(
         self, s, report: "SignalReport", side: str, now: datetime,
     ) -> bool:
-        """对触发价R:R达标但当前R:R不足的策略，直接挂限价单到交易所"""
+        """在交易所挂限价单，统一用于所有远离当前价的策略"""
         strat_id = str(uuid.uuid4())
+        effective_rr = max(s.risk_reward, s.rr_at_trigger)
 
         pending = PendingStrategy(
             id=strat_id,
@@ -302,7 +305,7 @@ class ExecutionEngine:
             stop_loss=s.stop_loss,
             take_profit_1=s.take_profit_1,
             take_profit_2=s.take_profit_2,
-            risk_reward=s.rr_at_trigger,
+            risk_reward=effective_rr,
             leverage=self._config.default_leverage,
             confidence=report.confidence,
             signal_strength=report.signal_strength.value,
@@ -335,11 +338,16 @@ class ExecutionEngine:
                                     reject_reason="auto_execute=false，仅记录")
             return False
 
-        buf = self._config.limit_order_price_buffer_pct / 100
+        strength_offset = {"strong": 0.08, "medium": 0.15, "weak": 0.25, "critical": 0.05}
+        offset_pct = strength_offset.get(
+            getattr(s, "trigger_strength", "medium"), 0.15,
+        ) / 100
+        offset_pct = max(offset_pct, self._config.limit_order_price_buffer_pct / 100)
+
         if side == "buy":
-            limit_price = round(s.trigger_price * (1 + buf), 2)
+            limit_price = round(s.trigger_price * (1 + offset_pct), 2)
         else:
-            limit_price = round(s.trigger_price * (1 - buf), 2)
+            limit_price = round(s.trigger_price * (1 - offset_pct), 2)
 
         amount = await self._calc_order_amount(
             check.suggested_amount_usd, limit_price, pending.leverage, report.symbol,
@@ -376,9 +384,9 @@ class ExecutionEngine:
                 "rr_at_trigger": s.rr_at_trigger,
             }
             logger.info(
-                "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R@trigger=%.2f",
+                "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R=%.2f",
                 report.symbol, s.strategy_type, side, amount, limit_price,
-                s.stop_loss, s.rr_at_trigger,
+                s.stop_loss, effective_rr,
             )
             return True
         else:

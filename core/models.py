@@ -264,6 +264,7 @@ class ConditionalStrategy:
     tp1_close_ratio: float = 0.5        # TP1 平仓比例 (0.5=平50%)
     market_state: str = ""              # 传递给执行层用于风控
     rr_at_trigger: float = 0.0          # 按触发价精确计算的盈亏比（限价单判定用）
+    trigger_strength: str = "medium"    # 触发位关键位强度: strong/medium/weak（挂单偏移用）
 
 
 @dataclass(frozen=True)

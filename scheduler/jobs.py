@@ -195,22 +195,24 @@ class JobScheduler:
                 )
 
         # 4. 信号回测验证（多时间窗口）
+        # APScheduler job 在线程池执行，需要通过主 loop 调度协程
+        loop = asyncio.get_event_loop()
         self._scheduler.add_job(
-            lambda: asyncio.ensure_future(self._run_signal_backtest("4h", 4)),
+            lambda: asyncio.run_coroutine_threadsafe(self._run_signal_backtest("4h", 4), loop),
             IntervalTrigger(hours=2),
             id="backtest_4h",
             name="回测验证 4h窗口",
             replace_existing=True,
         )
         self._scheduler.add_job(
-            lambda: asyncio.ensure_future(self._run_signal_backtest("12h", 12)),
+            lambda: asyncio.run_coroutine_threadsafe(self._run_signal_backtest("12h", 12), loop),
             IntervalTrigger(hours=4),
             id="backtest_12h",
             name="回测验证 12h窗口",
             replace_existing=True,
         )
         self._scheduler.add_job(
-            lambda: asyncio.ensure_future(self._run_signal_backtest("24h", 24)),
+            lambda: asyncio.run_coroutine_threadsafe(self._run_signal_backtest("24h", 24), loop),
             IntervalTrigger(hours=6),
             id="backtest_24h",
             name="回测验证 24h窗口",
