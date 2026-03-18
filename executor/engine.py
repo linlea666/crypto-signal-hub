@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.schema import ExecutorConfig
-from core.constants import SignalStrength
+from core.constants import SignalStrength, effective_min_quality
 from core.time_utils import now_beijing
 from executor.exchange_client import ExchangeClient
 from executor.models import OrderRecord, OrderStatus, PendingStrategy, RiskRejectReason
@@ -153,6 +153,10 @@ class ExecutionEngine:
             if side not in best_new or s.entry_quality > best_new[side]:
                 best_new[side] = s.entry_quality
 
+        # 根据市场状态动态调整入场质量门槛
+        state_str = report.market_state.value
+        min_q = effective_min_quality(self._config.min_entry_quality, state_str)
+
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
 
@@ -185,7 +189,7 @@ class ExecutionEngine:
                     placed_sides.add(side)
                     continue
 
-            if s.entry_quality < self._config.min_entry_quality:
+            if s.entry_quality < min_q:
                 continue
 
             # ── 反方向：入场质量达标后才取消对侧旧限价单 ──
@@ -203,7 +207,7 @@ class ExecutionEngine:
                     registered += 1
                     placed_sides.add(side)
             else:
-                if s.entry_quality < self._config.min_entry_quality:
+                if s.entry_quality < min_q:
                     continue
                 self._register_pending(s, report, side, now)
                 registered += 1

@@ -26,7 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config.schema import AppConfig
-from core.constants import AlertType, MarketState, SignalStrength
+from core.constants import AlertType, MarketState, SignalStrength, effective_min_quality
 from core.models import SignalReport
 from scheduler.sentinel import SentinelMonitor
 
@@ -132,7 +132,7 @@ class JobScheduler:
     def _is_signal_actionable(self, report: SignalReport) -> bool:
         """根据配置的门槛判断信号是否可操作。
 
-        可操作条件：信心度达标 + 至少一个策略入场质量达标。
+        可操作条件：信心度达标 + 至少一个策略入场质量达标（门槛随市场状态动态调整）。
         """
         threshold = self._config.general.actionable_min_confidence
         if report.confidence < threshold:
@@ -140,9 +140,12 @@ class JobScheduler:
         if not report.trade_plan:
             return False
 
-        min_quality = self._config.executor.min_entry_quality
+        min_q = effective_min_quality(
+            self._config.executor.min_entry_quality,
+            report.market_state.value,
+        )
         for s in report.trade_plan.strategies:
-            if s.entry_quality >= min_quality:
+            if s.entry_quality >= min_q:
                 return True
         return False
 
@@ -164,9 +167,13 @@ class JobScheduler:
             del self._hourly_actionable_count[k]
 
         # 检查 1: 同一 trigger 价格 4h 内去重
+        min_q = effective_min_quality(
+            self._config.executor.min_entry_quality,
+            report.market_state.value,
+        )
         if report.trade_plan:
             for s in report.trade_plan.strategies:
-                if s.entry_quality < self._config.executor.min_entry_quality:
+                if s.entry_quality < min_q:
                     continue
                 trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
                 cache_key = (symbol, trigger_key)
@@ -186,9 +193,13 @@ class JobScheduler:
         now = datetime.now()
         hour_key = now.strftime("%Y%m%d%H")
 
+        min_q = effective_min_quality(
+            self._config.executor.min_entry_quality,
+            report.market_state.value,
+        )
         if report.trade_plan:
             for s in report.trade_plan.strategies:
-                if s.entry_quality < self._config.executor.min_entry_quality:
+                if s.entry_quality < min_q:
                     continue
                 trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
                 self._trigger_dedup[(symbol, trigger_key)] = now
@@ -726,8 +737,11 @@ class JobScheduler:
                         reason = f"信心度{report.confidence:.0f}% < 门槛{threshold:.0f}%"
                     elif report.trade_plan and report.trade_plan.strategies:
                         best_q = max(s.entry_quality for s in report.trade_plan.strategies)
-                        min_q = self._config.executor.min_entry_quality
-                        reason = f"入场质量不足(最优{best_q:.0f} < 门槛{min_q:.0f})"
+                        eff_q = effective_min_quality(
+                            self._config.executor.min_entry_quality,
+                            report.market_state.value,
+                        )
+                        reason = f"入场质量不足(最优{best_q:.0f} < 门槛{eff_q:.0f}[{report.market_state.value}])"
                     else:
                         reason = "无可用策略"
                     logger.info(

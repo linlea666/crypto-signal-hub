@@ -125,6 +125,22 @@ US_MARKET_CLOSE_ET = (16, 0)  # 16:00 ET
 US_PRE_MARKET_ET = (4, 0)     # 04:00 ET
 US_AFTER_HOURS_END_ET = (20, 0)  # 20:00 ET
 
+# 入场质量动态门槛：按市场状态调整 base × multiplier
+# 趋势市降低（接受更多顺势机会），震荡市提高（只做区间极端位置）
+QUALITY_STATE_MULTIPLIER: dict[str, float] = {
+    "strong_trend": 0.8,
+    "trend_weakening": 1.1,
+    "ranging": 1.4,
+    "extreme_divergence": 1.2,
+}
+
+
+def effective_min_quality(base: float, market_state: str) -> float:
+    """根据市场状态动态调整入场质量门槛。"""
+    m = QUALITY_STATE_MULTIPLIER.get(market_state, 1.0)
+    return min(round(base * m, 1), 95.0)
+
+
 # 版本号
 VERSION = "0.4.0"
 APP_NAME = "CryptoSignal Hub"
