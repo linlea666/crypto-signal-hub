@@ -364,12 +364,14 @@ class ExchangeClient:
     ) -> bool:
         """为已有持仓设置止盈算法单（OKX conditional order）。
 
-        quantity: 要平仓的精确数量（张数），由调用方根据 close_ratio 计算好传入。
+        quantity: 要平仓的精确数量，由调用方根据 close_ratio 计算好传入。
         quantity=0 时自动查询持仓全平。
+        数量会按合约 lot size 自动取整（通过 ccxt amount_to_precision）。
         """
         if not self._exchange:
             return False
         inst_id = self._to_okx_inst_id(symbol)
+        swap_symbol = symbol.replace("/USDT", "/USDT:USDT")
         pos_side = "long" if side == "buy" else "short"
         close_side = "sell" if side == "buy" else "buy"
 
@@ -380,13 +382,22 @@ class ExchangeClient:
                 logger.warning("设置止盈失败 %s: 无法获取持仓数量", symbol)
                 return False
 
+        try:
+            await self._exchange.load_markets()
+            close_sz_str = self._exchange.amount_to_precision(swap_symbol, close_sz)
+            if float(close_sz_str) <= 0:
+                logger.warning("设置止盈失败 %s: 取整后数量为0 (原始=%.6f)", symbol, close_sz)
+                return False
+        except Exception:
+            close_sz_str = str(close_sz)
+
         params: dict = {
             "instId": inst_id,
             "tdMode": "cross",
             "side": close_side,
             "posSide": pos_side,
             "ordType": "conditional",
-            "sz": str(close_sz),
+            "sz": close_sz_str,
             "tpTriggerPx": str(tp_price),
             "tpOrdPx": "-1",
         }
@@ -394,8 +405,8 @@ class ExchangeClient:
         try:
             await self._exchange.private_post_trade_order_algo(params)
             logger.info(
-                "设置止盈成功 %s %s TP=%.2f sz=%.4f",
-                symbol, pos_side, tp_price, close_sz,
+                "设置止盈成功 %s %s TP=%.2f sz=%s",
+                symbol, pos_side, tp_price, close_sz_str,
             )
             return True
         except Exception as e:

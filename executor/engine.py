@@ -933,10 +933,10 @@ class ExecutionEngine:
             if tp1_triggered and tp_mode == "hybrid":
                 if is_long:
                     new_highest = max(highest, price)
-                    trail_sl = new_highest * (1 - callback_pct / 100)
+                    trail_sl = round(new_highest * (1 - callback_pct / 100), 2)
                 else:
                     new_highest = min(highest, price) if highest > 0 else price
-                    trail_sl = new_highest * (1 + callback_pct / 100)
+                    trail_sl = round(new_highest * (1 + callback_pct / 100), 2)
 
                 current_trail_sl = order.get("trailing_sl", 0) or 0
 
@@ -945,15 +945,14 @@ class ExecutionEngine:
                     or (not is_long and (current_trail_sl == 0 or trail_sl < current_trail_sl))
                 )
 
-                pnl_now = ((price - entry) / entry * 100) if is_long else ((entry - price) / entry * 100)
-
                 if sl_improved:
+                    pnl_now = ((price - entry) / entry * 100) if is_long else ((entry - price) / entry * 100)
                     await self._amend_sl_on_exchange(order, trail_sl)
                     self._tracker.update_status(
                         order["id"], OrderStatus.OPEN,
                         highest_price=new_highest,
-                        trailing_sl=round(trail_sl, 2),
-                        stop_loss=round(trail_sl, 2),
+                        trailing_sl=trail_sl,
+                        stop_loss=trail_sl,
                     )
                     logger.info(
                         "移动止盈更新 [%s] %s: 当前价=%.2f(浮盈%.2f%%) | "
