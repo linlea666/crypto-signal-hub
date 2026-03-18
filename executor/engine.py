@@ -349,6 +349,28 @@ class ExecutionEngine:
         else:
             limit_price = round(s.trigger_price * (1 - offset_pct), 2)
 
+        # SL 方向安全验证：buy 的 SL 必须 < limit_price，sell 的 SL 必须 > limit_price
+        sl_valid = (side == "buy" and s.stop_loss < limit_price) or \
+                   (side == "sell" and s.stop_loss > limit_price)
+        if not sl_valid:
+            logger.warning(
+                "限价单SL方向异常 [%s] %s %s: limit=%.2f SL=%.2f trigger=%.2f | "
+                "offset=%.4f%% strategy=%s, 回退到trigger价格",
+                report.symbol, s.strategy_type, side, limit_price,
+                s.stop_loss, s.trigger_price, offset_pct * 100, s.strategy_type,
+            )
+            limit_price = round(s.trigger_price, 2)
+            sl_valid = (side == "buy" and s.stop_loss < limit_price) or \
+                       (side == "sell" and s.stop_loss > limit_price)
+            if not sl_valid:
+                logger.warning(
+                    "限价单SL方向仍异常 [%s] %s: trigger=%.2f SL=%.2f，跳过",
+                    report.symbol, s.strategy_type, s.trigger_price, s.stop_loss,
+                )
+                self._save_order_record(pending, OrderStatus.FAILED,
+                                        reject_reason=f"SL方向异常: limit={limit_price} SL={s.stop_loss}")
+                return False
+
         amount = await self._calc_order_amount(
             check.suggested_amount_usd, limit_price, pending.leverage, report.symbol,
         )

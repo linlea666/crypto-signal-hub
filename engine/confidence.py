@@ -53,6 +53,12 @@ def calculate_confidence(
 
     confidence = basic_consistency * 0.25 + weighted_consistency * 0.75
 
+    # 信号强度衰减：方向一致但各因子绝对值很低时，降低信心度
+    # avg_intensity 为各方向因子 |normalized| 均值 (0~1)
+    avg_intensity = sum(abs(fs.normalized) for fs in directional) / total_factors
+    intensity_factor = 0.5 + 0.5 * avg_intensity  # 范围 0.5~1.0
+    confidence *= intensity_factor
+
     # 方向性因子过少时惩罚：避免 1 个因子有方向就得 100% 信心度
     if len(directional) < 3:
         confidence *= 0.4 + len(directional) * 0.2  # 1→0.6x, 2→0.8x
