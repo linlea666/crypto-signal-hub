@@ -8,10 +8,10 @@
 
 核心原则：小亏大赚
 - 每个策略独立计算盈亏比
-- R:R < 1.5 时标记为 SKIP 但仍展示（告知用户该价位不划算）
-- 根据 market_bias 对策略排序（偏多时回调做多优先）
-
-旧版 derive_trade_suggestion 保留兼容，内部委托给新逻辑。
+- R:R < 阈值时标记为 SKIP 但仍展示
+- rr_at_trigger 无效（<=0）时直接丢弃策略
+- SL 优先基于 ATR 动态计算，关键位作为参考
+- 逆势策略需 rr_at_trigger >= 1.5
 """
 
 from __future__ import annotations
@@ -28,12 +28,14 @@ from core.models import (
     KeyLevel,
     KeyLevels,
     PriceData,
+    TechnicalData,
     TradePlan,
     TradeSuggestion,
 )
 
-BREAKOUT_BUFFER_PCT = 0.008  # 0.8% — 突破/跌破 buffer（比 0.5% 更宽，减少假突破）
-HYBRID_TREND_MULTIPLIER = 1.25  # hybrid 模式仅用于仓位 composite 加成，不膨胀 R:R 阈值
+BREAKOUT_BUFFER_PCT = 0.008
+HYBRID_TREND_MULTIPLIER = 1.25
+MIN_TP1_DISTANCE_PCT = 0.015  # TP1 距 trigger 最少 1.5%
 
 
 # ══════════════════════════════════════
@@ -48,14 +50,9 @@ def derive_trade_plan(
     *,
     market_state: MarketState = MarketState.RANGING,
     strategy_mode: str = "adaptive",
+    technical: TechnicalData | None = None,
 ) -> TradePlan:
-    """始终生成包含多个条件策略的交易计划。
-
-    根据 market_state 和 strategy_mode 对策略类型进行约束：
-    - strong_trend / trend_only：只保留顺势策略
-    - ranging：双向策略，逆势标注高风险
-    - extreme_divergence：允许逆势但降仓位到 LIGHT
-    """
+    """始终生成包含多个条件策略的交易计划。"""
     current = price.current
     if current <= 0:
         return TradePlan(
@@ -63,40 +60,33 @@ def derive_trade_plan(
             immediate_action="价格数据异常，暂停交易",
         )
 
+    atr = _get_atr(technical, current)
+
     strategies: list[ConditionalStrategy] = []
 
-    # 始终尝试生成四种策略
-    pullback = _build_pullback_long(current, confidence, levels)
+    pullback = _build_pullback_long(current, confidence, levels, atr)
     if pullback:
         strategies.append(pullback)
 
-    bounce = _build_bounce_short(current, confidence, levels)
+    bounce = _build_bounce_short(current, confidence, levels, atr)
     if bounce:
         strategies.append(bounce)
 
-    breakout_long = _build_breakout_long(current, confidence, levels)
+    breakout_long = _build_breakout_long(current, confidence, levels, atr)
     if breakout_long:
         strategies.append(breakout_long)
 
-    breakout_short = _build_breakout_short(current, confidence, levels)
+    breakout_short = _build_breakout_short(current, confidence, levels, atr)
     if breakout_short:
         strategies.append(breakout_short)
 
-    # 根据市场状态过滤/约束策略
     strategies = _apply_state_constraints(
         strategies, direction, market_state, strategy_mode,
     )
-
-    # 按 market_bias 排序：偏向方向的策略排前面
     strategies = _sort_by_bias(strategies, direction)
-
-    # 取 top 3
     strategies = strategies[:3]
 
-    # 即时建议
     immediate = _derive_immediate_action(direction, confidence, strategies)
-
-    # 总体说明
     note = _derive_analysis_note(direction, confidence, levels, market_state)
 
     return TradePlan(
@@ -115,11 +105,10 @@ def derive_trade_suggestion(
     *,
     plan: TradePlan | None = None,
 ) -> TradeSuggestion | None:
-    """旧版兼容接口，从新版 TradePlan 中提取最优策略转换为 TradeSuggestion。"""
+    """旧版兼容接口。"""
     if plan is None:
         plan = derive_trade_plan(direction, confidence, price, levels)
 
-    # 找到第一个非 SKIP 的策略
     best = None
     for s in plan.strategies:
         if s.position_size != PositionSize.SKIP:
@@ -147,31 +136,54 @@ def derive_trade_suggestion(
 
 
 # ══════════════════════════════════════
+# ATR 辅助
+# ══════════════════════════════════════
+
+def _get_atr(tech: TechnicalData | None, current: float) -> float:
+    """获取 ATR 值，无 ATR 时按价格 2% 兜底。"""
+    if tech and tech.atr_4h and tech.atr_4h > 0:
+        return tech.atr_4h
+    return current * 0.02
+
+
+def _atr_sl(base: float, atr: float, direction: str, multiplier: float = 1.5) -> float:
+    """基于 ATR 计算 SL 并与关键位 SL 取更宽者。
+
+    direction: "long"(SL 在下) / "short"(SL 在上)
+    """
+    if direction == "long":
+        return round(base - atr * multiplier, 2)
+    return round(base + atr * multiplier, 2)
+
+
+# ══════════════════════════════════════
 # 四种条件策略构建
 # ══════════════════════════════════════
 
 def _build_pullback_long(
-    current: float, confidence: float, levels: KeyLevels,
+    current: float, confidence: float, levels: KeyLevels, atr: float,
 ) -> ConditionalStrategy | None:
     """回调做多：在支撑位挂买单。"""
     supports = levels.supports
     resistances = levels.resistances
 
-    # 触发价 = 最近的中/强支撑
     trigger_level = _find_nearest_level(supports, current, side="below", min_strength=2)
     if trigger_level is None:
         return None
 
     trigger = trigger_level.price
 
-    # 止损 = 下一个支撑的下方 1%
+    # SL：关键位 SL 和 ATR SL 取更宽（更保守）者
     sl_level = _find_next_level(supports, trigger, side="below")
-    stop_loss = (sl_level.price * 0.99) if sl_level else (trigger * 0.98)
+    level_sl = (sl_level.price * 0.99) if sl_level else (trigger * 0.98)
+    atr_sl_val = _atr_sl(trigger, atr, "long")
+    stop_loss = min(level_sl, atr_sl_val)
 
-    # 止盈 = 最近的阻力位
     tp1, tp2 = _find_tp_levels(resistances, current)
     if tp1 is None:
         tp1 = current * 1.03
+    # TP1 最小距离保证
+    tp1 = max(tp1, trigger * (1 + MIN_TP1_DISTANCE_PCT))
     if tp2 is None:
         tp2 = tp1 * 1.02
 
@@ -183,6 +195,9 @@ def _build_pullback_long(
 
     risk_at_trigger = trigger - stop_loss
     rr_trigger = round((tp1 - trigger) / risk_at_trigger, 2) if risk_at_trigger > 0 else 0.0
+
+    if rr_trigger <= 0:
+        return None
 
     invalidation_price = sl_level.price if sl_level else trigger * 0.98
     invalidation = f"价格跌破${invalidation_price:.0f}则策略失效"
@@ -198,7 +213,7 @@ def _build_pullback_long(
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
         position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
-        sl_source=f"{trigger_level.source}下方1%",
+        sl_source=f"{trigger_level.source}下方ATR×1.5",
         tp1_source=_level_source_label(resistances, tp1),
         reasoning=f"在{trigger_level.source}支撑位${trigger:.0f}附近挂买单，止损${stop_loss:.0f}",
         valid_hours=24,
@@ -210,7 +225,7 @@ def _build_pullback_long(
 
 
 def _build_bounce_short(
-    current: float, confidence: float, levels: KeyLevels,
+    current: float, confidence: float, levels: KeyLevels, atr: float,
 ) -> ConditionalStrategy | None:
     """反弹做空：在阻力位挂卖单。"""
     supports = levels.supports
@@ -222,14 +237,15 @@ def _build_bounce_short(
 
     trigger = trigger_level.price
 
-    # 止损 = 下一个阻力的上方 1%
     sl_level = _find_next_level(resistances, trigger, side="above")
-    stop_loss = (sl_level.price * 1.01) if sl_level else (trigger * 1.02)
+    level_sl = (sl_level.price * 1.01) if sl_level else (trigger * 1.02)
+    atr_sl_val = _atr_sl(trigger, atr, "short")
+    stop_loss = max(level_sl, atr_sl_val)
 
-    # 止盈 = 最近的支撑位
     tp1, tp2 = _find_tp_levels(supports, current)
     if tp1 is None:
         tp1 = current * 0.97
+    tp1 = min(tp1, trigger * (1 - MIN_TP1_DISTANCE_PCT))
     if tp2 is None:
         tp2 = tp1 * 0.98
 
@@ -241,6 +257,9 @@ def _build_bounce_short(
 
     risk_at_trigger = stop_loss - trigger
     rr_trigger = round((trigger - tp1) / risk_at_trigger, 2) if risk_at_trigger > 0 else 0.0
+
+    if rr_trigger <= 0:
+        return None
 
     invalidation_price = sl_level.price if sl_level else trigger * 1.02
     invalidation = f"价格放量突破${invalidation_price:.0f}则策略失效"
@@ -256,7 +275,7 @@ def _build_bounce_short(
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
         position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
-        sl_source=f"{trigger_level.source}上方1%",
+        sl_source=f"{trigger_level.source}上方ATR×1.5",
         tp1_source=_level_source_label(supports, tp1),
         reasoning=f"在{trigger_level.source}阻力位${trigger:.0f}附近挂卖单，止损${stop_loss:.0f}",
         valid_hours=24,
@@ -268,7 +287,7 @@ def _build_bounce_short(
 
 
 def _build_breakout_long(
-    current: float, confidence: float, levels: KeyLevels,
+    current: float, confidence: float, levels: KeyLevels, atr: float,
 ) -> ConditionalStrategy | None:
     """突破追多：在最近阻力上方设条件买单。"""
     resistances = levels.resistances
@@ -278,20 +297,26 @@ def _build_breakout_long(
     target_level = resistances[0]
     trigger = target_level.price * (1 + BREAKOUT_BUFFER_PCT)
 
-    # 止损 = 突破阻力位本身（突破后变支撑）
-    stop_loss = target_level.price * 0.99
+    # SL = 突破阻力位下方 1 ATR
+    level_sl = target_level.price * 0.99
+    atr_sl_val = _atr_sl(trigger, atr, "long", multiplier=1.0)
+    stop_loss = min(level_sl, atr_sl_val)
 
-    # 止盈 = 第二个阻力或 trigger + 同等距离
+    # TP1：保证最低距离
     if len(resistances) >= 2:
         tp1 = resistances[1].price
     else:
         tp1 = trigger + (trigger - stop_loss) * 2
+    tp1 = max(tp1, trigger * (1 + MIN_TP1_DISTANCE_PCT))
     tp2 = tp1 * 1.02
 
     risk = trigger - stop_loss
     if risk <= 0:
         return None
     rr_fixed = round((tp1 - trigger) / risk, 2)
+
+    if rr_fixed <= 0:
+        return None
 
     invalidation = f"突破后回落至${target_level.price:.0f}下方则为假突破"
 
@@ -307,7 +332,7 @@ def _build_breakout_long(
         risk_reward=rr_fixed,
         position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
         sl_source=f"{target_level.source}(突破后变支撑)",
-        tp1_source=_level_source_label(resistances[1:], tp1) if len(resistances) >= 2 else "等距目标",
+        tp1_source=_level_source_label(resistances[1:], tp1) if len(resistances) >= 2 else "ATR等距目标",
         reasoning=f"突破{target_level.source}阻力${target_level.price:.0f}后追多",
         valid_hours=12,
         invalidation=invalidation,
@@ -318,7 +343,7 @@ def _build_breakout_long(
 
 
 def _build_breakout_short(
-    current: float, confidence: float, levels: KeyLevels,
+    current: float, confidence: float, levels: KeyLevels, atr: float,
 ) -> ConditionalStrategy | None:
     """突破追空：在最近支撑下方设条件卖单。"""
     supports = levels.supports
@@ -328,20 +353,24 @@ def _build_breakout_short(
     target_level = supports[0]
     trigger = target_level.price * (1 - BREAKOUT_BUFFER_PCT)
 
-    # 止损 = 支撑位本身（跌破后变阻力）
-    stop_loss = target_level.price * 1.01
+    level_sl = target_level.price * 1.01
+    atr_sl_val = _atr_sl(trigger, atr, "short", multiplier=1.0)
+    stop_loss = max(level_sl, atr_sl_val)
 
-    # 止盈
     if len(supports) >= 2:
         tp1 = supports[1].price
     else:
         tp1 = trigger - (stop_loss - trigger) * 2
+    tp1 = min(tp1, trigger * (1 - MIN_TP1_DISTANCE_PCT))
     tp2 = tp1 * 0.98
 
     risk = stop_loss - trigger
     if risk <= 0:
         return None
     rr_fixed = round((trigger - tp1) / risk, 2)
+
+    if rr_fixed <= 0:
+        return None
 
     invalidation = f"跌破后反弹回${target_level.price:.0f}上方则为假跌破"
 
@@ -357,7 +386,7 @@ def _build_breakout_short(
         risk_reward=rr_fixed,
         position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
         sl_source=f"{target_level.source}(跌破后变阻力)",
-        tp1_source=_level_source_label(supports[1:], tp1) if len(supports) >= 2 else "等距目标",
+        tp1_source=_level_source_label(supports[1:], tp1) if len(supports) >= 2 else "ATR等距目标",
         reasoning=f"跌破{target_level.source}支撑${target_level.price:.0f}后追空",
         valid_hours=12,
         invalidation=invalidation,
@@ -377,7 +406,6 @@ _STRENGTH_ORDER = {"critical": 4, "strong": 3, "medium": 2, "weak": 1}
 def _find_nearest_level(
     levels: list[KeyLevel], current: float, side: str, min_strength: int = 2,
 ) -> KeyLevel | None:
-    """找到离当前价最近且强度 >= min_strength 的关键位。"""
     for lv in levels:
         strength = _STRENGTH_ORDER.get(lv.strength, 0)
         if strength < min_strength:
@@ -386,7 +414,6 @@ def _find_nearest_level(
             return lv
         if side == "above" and lv.price > current * 1.001:
             return lv
-    # 放宽强度要求
     for lv in levels:
         if side == "below" and lv.price < current * 0.999:
             return lv
@@ -398,7 +425,6 @@ def _find_nearest_level(
 def _find_next_level(
     levels: list[KeyLevel], reference: float, side: str,
 ) -> KeyLevel | None:
-    """找到参考价之后的下一个关键位。"""
     for lv in levels:
         if side == "below" and lv.price < reference * 0.999:
             return lv
@@ -410,10 +436,8 @@ def _find_next_level(
 def _find_tp_levels(
     levels: list[KeyLevel], current: float,
 ) -> tuple[float | None, float | None]:
-    """从关键位中取 2 个止盈目标，跳过方向不合理的价位。"""
     if not levels:
         return None, None
-    # 过滤掉在当前价「错误侧」的关键位（由调用方保证传入正确的列表方向）
     valid = [lv for lv in levels if abs(lv.price - current) / max(current, 1) > 0.002]
     if not valid:
         return None, None
@@ -423,7 +447,6 @@ def _find_tp_levels(
 
 
 def _level_source_label(levels: list[KeyLevel], target_price: float) -> str:
-    """为止盈价找到最接近的关键位来源名称。"""
     if not levels:
         return "计算目标"
     best = min(levels, key=lambda lv: abs(lv.price - target_price))
@@ -436,12 +459,7 @@ def _determine_position_size(
     risk_reward: float, confidence: float, tp_mode: str = "hybrid",
     level_strength: str = "medium",
 ) -> PositionSize:
-    """根据盈亏比和信心度连续计算仓位（软分级，消除硬边界）。
-
-    score = rr_factor * conf_factor, 映射到 LIGHT / NORMAL / HEAVY
-    hybrid 模式下最低盈亏比降为 1.0（有移动止盈兜底）。
-    critical 级别关键位（成交密集区共振）额外加成 30%。
-    """
+    """根据盈亏比和信心度连续计算仓位。"""
     min_rr = MIN_RISK_REWARD_HYBRID if tp_mode == "hybrid" else MIN_RISK_REWARD_RATIO
     if risk_reward < min_rr:
         return PositionSize.SKIP
@@ -451,9 +469,9 @@ def _determine_position_size(
 
     composite = rr_factor * conf_factor
     if tp_mode == "hybrid":
-        composite *= HYBRID_TREND_MULTIPLIER  # hybrid 有移动止盈，仓位评估给予额外信心
+        composite *= HYBRID_TREND_MULTIPLIER
     if level_strength == "critical":
-        composite *= 1.3  # 密集成交区共振加成
+        composite *= 1.3
     if composite >= 1.8:
         return PositionSize.HEAVY
     if composite >= 1.1:
@@ -467,7 +485,10 @@ def _apply_state_constraints(
     market_state: MarketState,
     strategy_mode: str,
 ) -> list[ConditionalStrategy]:
-    """根据市场状态和用户策略模式过滤/修改策略。"""
+    """根据市场状态和用户策略模式过滤/修改策略。
+
+    对逆势策略额外要求 rr_at_trigger >= 1.5。
+    """
     force_trend_only = (
         strategy_mode == "trend_only"
         or market_state == MarketState.STRONG_TREND
@@ -485,74 +506,69 @@ def _apply_state_constraints(
     if force_trend_only:
         return [s for s in strategies if s.strategy_type in trend_types]
 
-    if market_state == MarketState.EXTREME_DIVERGENCE:
-        result = []
-        for s in strategies:
-            if s.strategy_type in counter_types:
-                if s.position_size not in (PositionSize.SKIP, PositionSize.LIGHT):
-                    s = ConditionalStrategy(
-                        strategy_type=s.strategy_type,
-                        label=s.label + "⚠️逆势轻仓",
-                        trigger_price=s.trigger_price,
-                        entry_low=s.entry_low,
-                        entry_high=s.entry_high,
-                        stop_loss=s.stop_loss,
-                        take_profit_1=s.take_profit_1,
-                        take_profit_2=s.take_profit_2,
-                        risk_reward=s.risk_reward,
-                        position_size=PositionSize.LIGHT,
-                        sl_source=s.sl_source,
-                        tp1_source=s.tp1_source,
-                        reasoning=s.reasoning + "（极端背离，限轻仓）",
-                        valid_hours=s.valid_hours,
-                        invalidation=s.invalidation,
-                        tp_mode=s.tp_mode,
-                        trailing_callback_pct=s.trailing_callback_pct,
-                        tp1_close_ratio=s.tp1_close_ratio,
-                    )
-            result.append(s)
-        return result
-
     result = []
     for s in strategies:
         if s.strategy_type in counter_types:
-            s = ConditionalStrategy(
-                strategy_type=s.strategy_type,
-                label=s.label + "⚠️逆势",
-                trigger_price=s.trigger_price,
-                entry_low=s.entry_low,
-                entry_high=s.entry_high,
-                stop_loss=s.stop_loss,
-                take_profit_1=s.take_profit_1,
-                take_profit_2=s.take_profit_2,
-                risk_reward=s.risk_reward,
-                position_size=s.position_size,
-                sl_source=s.sl_source,
-                tp1_source=s.tp1_source,
-                reasoning=s.reasoning,
-                valid_hours=s.valid_hours,
-                invalidation=s.invalidation,
-                tp_mode=s.tp_mode,
-                trailing_callback_pct=s.trailing_callback_pct,
-                tp1_close_ratio=s.tp1_close_ratio,
-            )
+            # 逆势策略需 rr_at_trigger >= 1.5
+            if s.rr_at_trigger < 1.5:
+                s = _replace_strategy(
+                    s,
+                    position_size=PositionSize.SKIP,
+                    label=s.label + "⚠️逆势R:R不足",
+                )
+            elif market_state == MarketState.EXTREME_DIVERGENCE:
+                if s.position_size not in (PositionSize.SKIP, PositionSize.LIGHT):
+                    s = _replace_strategy(
+                        s,
+                        position_size=PositionSize.LIGHT,
+                        label=s.label + "⚠️逆势轻仓",
+                        reasoning=s.reasoning + "（极端背离，限轻仓）",
+                    )
+            elif market_state == MarketState.TREND_WEAKENING:
+                s = _replace_strategy(s, label=s.label + "⚠️趋势衰减逆势")
+            else:
+                s = _replace_strategy(s, label=s.label + "⚠️逆势")
         result.append(s)
     return result
+
+
+def _replace_strategy(s: ConditionalStrategy, **kwargs) -> ConditionalStrategy:
+    """创建策略副本并替换指定字段。"""
+    fields = {
+        "strategy_type": s.strategy_type,
+        "label": s.label,
+        "trigger_price": s.trigger_price,
+        "entry_low": s.entry_low,
+        "entry_high": s.entry_high,
+        "stop_loss": s.stop_loss,
+        "take_profit_1": s.take_profit_1,
+        "take_profit_2": s.take_profit_2,
+        "risk_reward": s.risk_reward,
+        "position_size": s.position_size,
+        "sl_source": s.sl_source,
+        "tp1_source": s.tp1_source,
+        "reasoning": s.reasoning,
+        "valid_hours": s.valid_hours,
+        "invalidation": s.invalidation,
+        "tp_mode": s.tp_mode,
+        "trailing_callback_pct": s.trailing_callback_pct,
+        "tp1_close_ratio": s.tp1_close_ratio,
+        "market_state": s.market_state,
+        "rr_at_trigger": s.rr_at_trigger,
+        "trigger_strength": s.trigger_strength,
+    }
+    fields.update(kwargs)
+    return ConditionalStrategy(**fields)
 
 
 def _sort_by_bias(
     strategies: list[ConditionalStrategy], bias: Direction,
 ) -> list[ConditionalStrategy]:
-    """按市场偏向排序策略：偏向方向的策略优先。"""
-    # 偏多时：pullback_long > breakout_long > bounce_short > breakout_short
-    # 偏空时：bounce_short > breakout_short > pullback_long > breakout_long
-    # 中性时：按 R:R 排序
     if bias == Direction.BULLISH:
         order = {"pullback_long": 0, "breakout_long": 1, "bounce_short": 2, "breakout_short": 3}
     elif bias == Direction.BEARISH:
         order = {"bounce_short": 0, "breakout_short": 1, "pullback_long": 2, "breakout_long": 3}
     else:
-        # 中性：按盈亏比从高到低
         return sorted(strategies, key=lambda s: s.risk_reward, reverse=True)
 
     return sorted(strategies, key=lambda s: order.get(s.strategy_type, 99))
@@ -562,7 +578,6 @@ def _derive_immediate_action(
     direction: Direction, confidence: float,
     strategies: list[ConditionalStrategy],
 ) -> str:
-    """生成即时行动建议。"""
     viable = [s for s in strategies if s.position_size != PositionSize.SKIP]
 
     if not viable:
@@ -588,9 +603,9 @@ def _derive_analysis_note(
     direction: Direction, confidence: float, levels: KeyLevels,
     market_state: MarketState = MarketState.RANGING,
 ) -> str:
-    """生成策略总体说明。"""
     state_labels = {
         MarketState.STRONG_TREND: "强趋势",
+        MarketState.TREND_WEAKENING: "趋势衰减",
         MarketState.RANGING: "震荡",
         MarketState.EXTREME_DIVERGENCE: "极端背离",
     }

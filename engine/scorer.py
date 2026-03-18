@@ -106,6 +106,7 @@ class SignalScorer:
             levels=key_levels,
             market_state=market_state,
             strategy_mode=strategy_mode,
+            technical=snapshot.technical,
         )
 
         # 旧版兼容

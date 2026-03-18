@@ -140,8 +140,8 @@ class AIReporter(AIProvider):
 def build_score_summary(report) -> str:
     """将评分结果格式化为 AI 可理解的摘要文本"""
     state_labels = {
-        "strong_trend": "强趋势", "ranging": "震荡",
-        "extreme_divergence": "极端背离",
+        "strong_trend": "强趋势", "trend_weakening": "趋势衰减",
+        "ranging": "震荡", "extreme_divergence": "极端背离",
     }
     ms = getattr(report, "market_state", None)
     ms_label = state_labels.get(ms.value, ms.value) if ms else "未分类"

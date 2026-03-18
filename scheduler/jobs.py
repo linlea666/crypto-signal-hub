@@ -17,7 +17,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -60,6 +61,10 @@ class JobScheduler:
         self._scheduler = AsyncIOScheduler()
         # 最新报告缓存（供 Web 大屏读取）
         self._latest_reports: dict[str, dict] = {}
+        # 信号去重缓存：{(symbol, trigger_key): datetime}
+        self._trigger_dedup: dict[tuple[str, str], datetime] = {}
+        # 每小时可操作信号计数：{(symbol, hour_key): count}
+        self._hourly_actionable_count: dict[tuple[str, str], int] = {}
         # 哨兵监控器
         self._sentinel = SentinelMonitor(
             config=config,
@@ -144,6 +149,56 @@ class JobScheduler:
             if s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID:
                 return True
         return False
+
+    def _check_signal_dedup(self, symbol: str, report: SignalReport) -> str | None:
+        """检查信号是否因去重而应降级为观察。
+
+        返回降级原因字符串（非 None 则应降级），None 表示通过。
+        """
+        now = datetime.now()
+
+        # 清理过期缓存（超 4h 的 trigger 记录）
+        expired = [k for k, t in self._trigger_dedup.items() if (now - t).total_seconds() > 14400]
+        for k in expired:
+            del self._trigger_dedup[k]
+        # 清理过期小时计数
+        hour_key_now = now.strftime("%Y%m%d%H")
+        expired_hours = [k for k in self._hourly_actionable_count if k[1] != hour_key_now]
+        for k in expired_hours:
+            del self._hourly_actionable_count[k]
+
+        # 检查 1: 同一 trigger 价格 4h 内去重
+        if report.trade_plan:
+            for s in report.trade_plan.strategies:
+                if s.position_size.value == "skip" and s.rr_at_trigger < 1.0:
+                    continue
+                trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
+                cache_key = (symbol, trigger_key)
+                if cache_key in self._trigger_dedup:
+                    return f"trigger去重({trigger_key}, 4h内已执行)"
+
+        # 检查 2: 每小时同币种最多 2 条可操作信号
+        hour_count_key = (symbol, hour_key_now)
+        current_count = self._hourly_actionable_count.get(hour_count_key, 0)
+        if current_count >= 2:
+            return f"每小时可操作信号上限(已{current_count}条)"
+
+        return None
+
+    def _record_signal_executed(self, symbol: str, report: SignalReport) -> None:
+        """记录信号执行，更新去重缓存。"""
+        now = datetime.now()
+        hour_key = now.strftime("%Y%m%d%H")
+
+        if report.trade_plan:
+            for s in report.trade_plan.strategies:
+                if s.position_size.value == "skip" and s.rr_at_trigger < 1.0:
+                    continue
+                trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
+                self._trigger_dedup[(symbol, trigger_key)] = now
+
+        count_key = (symbol, hour_key)
+        self._hourly_actionable_count[count_key] = self._hourly_actionable_count.get(count_key, 0) + 1
 
     def setup(self) -> None:
         """配置所有定时任务"""
@@ -640,6 +695,13 @@ class JobScheduler:
             # 4. 存储
             is_actionable = self._is_signal_actionable(report)
 
+            # 信号去重：可操作信号经去重检查后可能降级为观察
+            dedup_reason = None
+            if is_actionable:
+                dedup_reason = self._check_signal_dedup(symbol, report)
+                if dedup_reason:
+                    is_actionable = False
+
             report_dict = self._serialize_report(report)
             report_dict["is_actionable"] = is_actionable
             self._db.save_report(report_dict)
@@ -650,6 +712,7 @@ class JobScheduler:
             if self._executor and report.trade_plan and is_actionable:
                 try:
                     await self._executor.on_new_plan(symbol, report)
+                    self._record_signal_executed(symbol, report)
                 except Exception as e:
                     logger.warning("执行层接收计划失败: %s", e)
 
@@ -657,9 +720,13 @@ class JobScheduler:
             if not skip_dispatch:
                 if is_actionable:
                     await self._dispatcher.dispatch(report)
+                    if not self._executor:
+                        self._record_signal_executed(symbol, report)
                 else:
                     threshold = self._config.general.actionable_min_confidence
-                    if report.confidence < threshold:
+                    if dedup_reason:
+                        reason = dedup_reason
+                    elif report.confidence < threshold:
                         reason = f"信心度{report.confidence:.0f}% < 门槛{threshold:.0f}%"
                     elif report.trade_plan and report.trade_plan.strategies:
                         reason = "所有策略盈亏比不足(含触发价R:R)"
@@ -767,6 +834,7 @@ class JobScheduler:
             "market_state": report.market_state.value,
             "market_state_label": {
                 "strong_trend": "强趋势",
+                "trend_weakening": "趋势衰减",
                 "ranging": "震荡",
                 "extreme_divergence": "极端背离",
             }.get(report.market_state.value, report.market_state.value),

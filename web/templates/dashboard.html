@@ -47,7 +47,7 @@
 {% set market_state = report.get('market_state', 'ranging') if report else 'ranging' %}
 {% set market_state_label = report.get('market_state_label', '震荡') if report else '震荡' %}
 {% set trigger_reason = report.get('trigger_reason', '') if report else '' %}
-{% set STATE_CSS = {"strong_trend": "state-trend", "ranging": "state-ranging", "extreme_divergence": "state-extreme"} %}
+{% set STATE_CSS = {"strong_trend": "state-trend", "trend_weakening": "state-weakening", "ranging": "state-ranging", "extreme_divergence": "state-extreme"} %}
 
 {# 时间戳宏：面板标题右侧显示分析时间 #}
 {% macro panel_time() %}

@@ -45,8 +45,8 @@
       {{ signal_strength|upper }} SIGNAL
     </div>
     {% if market_state %}
-    {% set state_colors = {"strong_trend": "#10b981", "ranging": "#94a3b8", "extreme_divergence": "#f59e0b"} %}
-    {% set state_labels = {"strong_trend": "强趋势", "ranging": "震荡", "extreme_divergence": "极端背离"} %}
+    {% set state_colors = {"strong_trend": "#10b981", "trend_weakening": "#fbbf24", "ranging": "#94a3b8", "extreme_divergence": "#f59e0b"} %}
+    {% set state_labels = {"strong_trend": "强趋势", "trend_weakening": "趋势衰减", "ranging": "震荡", "extreme_divergence": "极端背离"} %}
     {% set sc = state_colors.get(market_state, '#94a3b8') %}
     <div style="display:inline-block;padding:6px 14px;border-radius:20px;background:{{ sc }}20;border:1px solid {{ sc }};color:{{ sc }};font-size:12px;font-weight:600;margin-left:8px">
       {{ state_labels.get(market_state, market_state) }}

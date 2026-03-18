@@ -132,8 +132,10 @@ class ExchangeCollector(DataCollector):
         close = df["close"]
         highs = df["high"]
         lows = df["low"]
-        ma20 = close.rolling(window=20).mean().iloc[-1]
-        ma60_val = close.rolling(window=min(60, len(close))).mean().iloc[-1] if len(close) >= 30 else None
+        ma20_series = close.rolling(window=20).mean()
+        ma20 = ma20_series.iloc[-1]
+        ma60_series = close.rolling(window=min(60, len(close))).mean() if len(close) >= 30 else None
+        ma60_val = ma60_series.iloc[-1] if ma60_series is not None else None
 
         current_price = close.iloc[-1]
         if ma60_val and ma20 > ma60_val and current_price > ma20:
@@ -142,6 +144,30 @@ class ExchangeCollector(DataCollector):
             ma_trend = Direction.BEARISH
         else:
             ma_trend = Direction.NEUTRAL
+
+        # MA20/MA60 金叉/死叉检测
+        ma_cross = "none"
+        if ma60_series is not None and len(ma20_series) >= 2 and len(ma60_series) >= 2:
+            prev_ma20 = ma20_series.iloc[-2]
+            prev_ma60 = ma60_series.iloc[-2]
+            if pd.notna(prev_ma20) and pd.notna(prev_ma60):
+                if prev_ma20 <= prev_ma60 and ma20 > ma60_val:
+                    ma_cross = "golden"
+                elif prev_ma20 >= prev_ma60 and ma20 < ma60_val:
+                    ma_cross = "death"
+
+        # ATR(14) 计算
+        atr_val = None
+        atr_pct_val = None
+        try:
+            atr_indicator = ta.volatility.AverageTrueRange(highs, lows, close, window=14)
+            atr_series = atr_indicator.average_true_range()
+            if not atr_series.empty and pd.notna(atr_series.iloc[-1]):
+                atr_val = round(float(atr_series.iloc[-1]), 2)
+                if current_price > 0:
+                    atr_pct_val = round(atr_val / current_price * 100, 3)
+        except Exception:
+            pass
 
         rsi_series = ta.momentum.rsi(close, window=14)
         rsi_val = rsi_series.iloc[-1] if not rsi_series.empty else None
@@ -186,6 +212,9 @@ class ExchangeCollector(DataCollector):
             daily_close_strength=daily_strength,
             daily_close_vs_ma20=daily_vs_ma,
             volume_profile_levels=vp_levels,
+            atr_4h=atr_val,
+            atr_pct=atr_pct_val,
+            ma_cross=ma_cross,
         )
 
     @staticmethod

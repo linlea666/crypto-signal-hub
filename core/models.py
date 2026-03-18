@@ -60,6 +60,11 @@ class TechnicalData:
     daily_close_vs_ma20: str = "unknown"       # above / below / near
     # ── 成交量分布（Volume Profile 简化版，纯计算） ──
     volume_profile_levels: list[float] = field(default_factory=list)  # 高成交量价格节点
+    # ── ATR 波动率（ta 库计算） ──
+    atr_4h: float | None = None       # ATR(14) 绝对值（4h K 线）
+    atr_pct: float | None = None      # ATR 占价格百分比
+    # ── MA 均线交叉（金叉/死叉事件） ──
+    ma_cross: str = "none"            # "golden"=MA20上穿MA60, "death"=MA20下穿MA60, "none"
 
 
 @dataclass(frozen=True)
@@ -109,7 +114,11 @@ class MacroData:
     sp500_change_pct: float = 0.0
     dxy_price: float | None = None
     dxy_change_pct: float = 0.0
-    vix_value: float | None = None              # ifnews 无此字段，保留兼容旧数据
+    vix_value: float | None = None              # 新浪 VIX 恐慌指数实时值
+    us10y_yield: float | None = None            # 美国 10 年期国债收益率
+    us10y_change_pct: float = 0.0               # 10Y 收益率日涨跌幅 %
+    gold_price: float | None = None             # COMEX 黄金价格（避险情绪参考）
+    gold_change_pct: float = 0.0                # 黄金日涨跌幅 %
     btc_etf_flow_usd: float | None = None       # 当日 ETF 净流入（美元）
     btc_etf_flow_3d_trend: str = "unknown"      # inflow / outflow / mixed
     fear_greed_value: int | None = None          # 0-100

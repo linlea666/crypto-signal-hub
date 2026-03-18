@@ -934,6 +934,10 @@ td.bearish { color: var(--bearish); }
     background: rgba(16, 185, 129, 0.15); color: #10b981;
     border: 1px solid rgba(16, 185, 129, 0.3);
 }
+.state-weakening {
+    background: rgba(251, 191, 36, 0.15); color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
 .state-ranging {
     background: rgba(148, 163, 184, 0.15); color: #94a3b8;
     border: 1px solid rgba(148, 163, 184, 0.3);

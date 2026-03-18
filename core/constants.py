@@ -75,6 +75,7 @@ class AlertType(str, Enum):
 class MarketState(str, Enum):
     """市场状态，决定策略生成约束"""
     STRONG_TREND = "strong_trend"            # 强趋势：只生成顺势策略
+    TREND_WEAKENING = "trend_weakening"      # 趋势衰减：顺势降仓，逆势需高 R:R
     RANGING = "ranging"                      # 震荡/弱趋势：双向策略，标注风险
     EXTREME_DIVERGENCE = "extreme_divergence"  # 极端背离：允许逆势但限轻仓
 

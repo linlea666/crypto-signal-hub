@@ -113,6 +113,7 @@ class HealthChecker:
             self._probe_exchange(self._exchange_config.secondary, "交易所-辅"),
             self._probe_exchange(self._exchange_config.options_source, "期权数据源"),
             self._probe_ifnews(),
+            self._probe_vix_sina(),
             self._probe_fear_greed(),
             self._probe_ai(),
             self._probe_smtp(),
@@ -207,6 +208,33 @@ class HealthChecker:
         except Exception as e:
             return ProbeResult(
                 name="全球股市 (ifnews)",
+                status=HealthStatus.ERROR,
+                message=str(e)[:100],
+                last_check=now,
+            )
+
+    async def _probe_vix_sina(self) -> ProbeResult:
+        """探测新浪 VIX 接口可用性"""
+        now = now_beijing().isoformat()
+        try:
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
+                resp = await client.get("https://gi.finance.sina.com.cn/hq/min?symbol=VIX")
+                resp.raise_for_status()
+                data = resp.json()
+            latency = (time.monotonic() - start) * 1000
+            rows = data.get("result", {}).get("data", [])
+            vix_val = rows[-1][1] if rows and len(rows[-1]) >= 2 else "?"
+            return ProbeResult(
+                name="VIX恐慌指数 (新浪)",
+                status=HealthStatus.OK if latency < SLOW_THRESHOLD_MS else HealthStatus.DEGRADED,
+                latency_ms=round(latency, 0),
+                message=f"VIX={vix_val}, {latency:.0f}ms",
+                last_check=now,
+            )
+        except Exception as e:
+            return ProbeResult(
+                name="VIX恐慌指数 (新浪)",
                 status=HealthStatus.ERROR,
                 message=str(e)[:100],
                 last_check=now,

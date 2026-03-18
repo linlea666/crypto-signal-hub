@@ -96,7 +96,7 @@ class RiskGuard:
         parts.append(f"rr={rr:.1f}({rr_factor:.2f}x)")
 
         # 4) 市场状态因子
-        state_map = {"strong_trend": 1.0, "ranging": 0.8, "extreme_divergence": 0.6}
+        state_map = {"strong_trend": 1.0, "trend_weakening": 0.75, "ranging": 0.8, "extreme_divergence": 0.6}
         state_factor = state_map.get(strategy.market_state, 0.8)
         parts.append(f"state={strategy.market_state}({state_factor}x)")
 
