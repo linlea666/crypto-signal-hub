@@ -331,7 +331,8 @@
                     <div class="form-group">
                         <label>最低入场质量 (0-100)</label>
                         <input type="number" id="p-min-quality" name="executor.min_entry_quality" value="{{ config.executor.min_entry_quality }}" class="input" min="0" max="100" step="5">
-                        <small style="color: #9ca3af; display:block; margin-top:2px;">综合区间位置+ATR距离+关键位强度，≥60优质，40-60一般</small>
+                        <small id="quality-hint" style="color: #9ca3af; display:block; margin-top:2px;">综合区间位置+ATR距离+关键位强度，≥60优质，40-60一般</small>
+                        <small id="quality-dynamic" style="color: #64748b; display:block; margin-top:1px; font-size:11px;"></small>
                     </div>
                     <div class="form-group">
                         <label>最小下单金额 (USD)</label>
@@ -442,6 +443,15 @@ function applyPreset(name) {
     if (p.min_entry_quality !== undefined) {
         document.getElementById('p-min-quality').value = p.min_entry_quality;
     }
+    updateQualityHint();
+}
+
+function updateQualityHint() {
+    const base = parseFloat(document.getElementById('p-min-quality').value) || 50;
+    const m = {strong_trend: 0.8, trend_weakening: 1.1, ranging: 1.4, extreme_divergence: 1.2};
+    const labels = {strong_trend: '强趋势', trend_weakening: '趋势转弱', ranging: '震荡', extreme_divergence: '极端背离'};
+    const parts = Object.entries(m).map(([k, v]) => labels[k] + ':' + Math.min(Math.round(base * v), 95));
+    document.getElementById('quality-dynamic').textContent = '动态门槛 → ' + parts.join(' | ');
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -455,6 +465,9 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('preset-desc').textContent = '自定义模式：手动调整下方参数';
         });
     });
+
+    document.getElementById('p-min-quality').addEventListener('input', updateQualityHint);
+    updateQualityHint();
 });
 
 /* ── 币种标签管理 ── */
