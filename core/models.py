@@ -75,6 +75,9 @@ class FundingRateData:
     level: FundingRateLevel = FundingRateLevel.NORMAL
     # ── 期现基差（httpx 从 OKX premium 接口补充） ──
     basis_rate: float = 0.0  # (合约价-现货价)/现货价，正=期货升水，负=贴水
+    # ── 费率趋势（连续正/负天数） ──
+    consecutive_negative_days: int = 0  # 连续负费率天数（>0 = 空头持续付费）
+    consecutive_positive_days: int = 0  # 连续正费率天数（>0 = 多头持续付费）
 
 
 @dataclass(frozen=True)
@@ -274,6 +277,7 @@ class ConditionalStrategy:
     market_state: str = ""              # 传递给执行层用于风控
     rr_at_trigger: float = 0.0          # 按触发价精确计算的盈亏比（限价单判定用）
     trigger_strength: str = "medium"    # 触发位关键位强度: strong/medium/weak（挂单偏移用）
+    entry_quality: float = 0.0          # 入场质量评分 (0-100)：综合区间位置+ATR距离+关键位强度
 
 
 @dataclass(frozen=True)

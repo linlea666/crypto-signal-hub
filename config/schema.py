@@ -191,6 +191,10 @@ class ExecutorConfig(BaseModel):
         default=0.05, ge=0.0, le=0.5,
         description="限价单价格缓冲(%)，多单在trigger上方加此比例提升成交率",
     )
+    min_entry_quality: float = Field(
+        default=40.0, ge=0.0, le=100.0,
+        description="最低入场质量评分(0-100)，综合评估挂单位置、ATR距离、关键位强度，低于此值不执行",
+    )
     min_order_usd: float = Field(
         default=12.0, ge=5.0, le=500.0,
         description="单笔最小下单金额(USD)，低于交易所最低时自动提升",

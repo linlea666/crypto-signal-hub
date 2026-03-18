@@ -19,8 +19,6 @@ from __future__ import annotations
 from core.constants import (
     Direction,
     MarketState,
-    MIN_RISK_REWARD_HYBRID,
-    MIN_RISK_REWARD_RATIO,
     PositionSize,
 )
 from core.models import (
@@ -36,6 +34,8 @@ from core.models import (
 BREAKOUT_BUFFER_PCT = 0.008
 HYBRID_TREND_MULTIPLIER = 1.25
 MIN_TP1_DISTANCE_PCT = 0.015  # TP1 距 trigger 最少 1.5%
+MIN_ENTRY_QUALITY_HARD = 15   # 低于此值在策略层直接 SKIP（绝对垃圾位置）
+MAX_ENTRY_DISTANCE_ATR = 3.0  # 关键位搜索最大 ATR 距离
 
 
 # ══════════════════════════════════════
@@ -61,22 +61,24 @@ def derive_trade_plan(
         )
 
     atr = _get_atr(technical, current)
+    h24 = price.high_24h or current * 1.02
+    l24 = price.low_24h or current * 0.98
 
     strategies: list[ConditionalStrategy] = []
 
-    pullback = _build_pullback_long(current, confidence, levels, atr)
+    pullback = _build_pullback_long(current, confidence, levels, atr, h24, l24)
     if pullback:
         strategies.append(pullback)
 
-    bounce = _build_bounce_short(current, confidence, levels, atr)
+    bounce = _build_bounce_short(current, confidence, levels, atr, h24, l24)
     if bounce:
         strategies.append(bounce)
 
-    breakout_long = _build_breakout_long(current, confidence, levels, atr)
+    breakout_long = _build_breakout_long(current, confidence, levels, atr, h24, l24)
     if breakout_long:
         strategies.append(breakout_long)
 
-    breakout_short = _build_breakout_short(current, confidence, levels, atr)
+    breakout_short = _build_breakout_short(current, confidence, levels, atr, h24, l24)
     if breakout_short:
         strategies.append(breakout_short)
 
@@ -157,17 +159,108 @@ def _atr_sl(base: float, atr: float, direction: str, multiplier: float = 1.5) ->
 
 
 # ══════════════════════════════════════
+# 入场质量评分
+# ══════════════════════════════════════
+
+def _calc_entry_quality(
+    trigger: float, current: float, atr: float,
+    high_24h: float, low_24h: float,
+    strength: str, side: str, strategy_type: str,
+) -> float:
+    """综合入场质量评分 (0-100)。
+
+    三个维度：
+    1. 区间位置 (0-40)：做多要在区间底部，做空要在区间顶部
+    2. ATR 距离 (0-35)：回调/反弹越深越好，突破不宜太远
+    3. 关键位强度 (0-25)：critical > strong > medium > weak
+    """
+    is_breakout = "breakout" in strategy_type
+
+    # ── 维度 1：区间位置 (0-40) ──
+    range_size = high_24h - low_24h
+    if not is_breakout and range_size > 0 and low_24h > 0:
+        position_pct = (trigger - low_24h) / range_size
+        position_pct = max(0.0, min(1.0, position_pct))
+        if side == "long":
+            range_score = max(0.0, (0.45 - position_pct)) / 0.45 * 40
+        else:
+            range_score = max(0.0, (position_pct - 0.55)) / 0.45 * 40
+    else:
+        range_score = 20.0
+
+    # ── 维度 2：ATR 距离 (0-35) ──
+    distance_atr = abs(current - trigger) / atr if atr > 0 else 0.0
+    if is_breakout:
+        if distance_atr <= 1.0:
+            dist_score = 35.0
+        else:
+            dist_score = max(0.0, 35.0 - (distance_atr - 1.0) * 15)
+    else:
+        dist_score = min(distance_atr / 1.5, 1.0) * 35
+
+    # ── 维度 3：关键位强度 (0-25) ──
+    strength_scores = {"critical": 25, "strong": 18, "medium": 10, "weak": 3}
+    level_score = strength_scores.get(strength, 5)
+
+    return round(range_score + dist_score + level_score, 1)
+
+
+def _find_best_entry_level(
+    levels: list[KeyLevel], current: float, atr: float,
+    high_24h: float, low_24h: float,
+    side: str, strategy_type: str,
+) -> KeyLevel | None:
+    """在所有候选关键位中选择入场质量最高的（而非最近的）。
+
+    限制搜索范围在 MAX_ENTRY_DISTANCE_ATR 以内，
+    并要求至少 medium 强度（无候选时放宽到所有强度）。
+    """
+    def _candidates(min_str: int) -> list[tuple[float, KeyLevel]]:
+        result = []
+        for lv in levels:
+            s_val = _STRENGTH_ORDER.get(lv.strength, 0)
+            if s_val < min_str:
+                continue
+            if side == "below" and lv.price >= current * 0.999:
+                continue
+            if side == "above" and lv.price <= current * 1.001:
+                continue
+            if abs(lv.price - current) > atr * MAX_ENTRY_DISTANCE_ATR:
+                continue
+            quality = _calc_entry_quality(
+                lv.price, current, atr, high_24h, low_24h,
+                lv.strength, "long" if side == "below" else "short",
+                strategy_type,
+            )
+            result.append((quality, lv))
+        return result
+
+    candidates = _candidates(min_str=2)
+    if not candidates:
+        candidates = _candidates(min_str=0)
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+# ══════════════════════════════════════
 # 四种条件策略构建
 # ══════════════════════════════════════
 
 def _build_pullback_long(
     current: float, confidence: float, levels: KeyLevels, atr: float,
+    high_24h: float = 0.0, low_24h: float = 0.0,
 ) -> ConditionalStrategy | None:
-    """回调做多：在支撑位挂买单。"""
+    """回调做多：在入场质量最高的支撑位挂买单。"""
     supports = levels.supports
     resistances = levels.resistances
 
-    trigger_level = _find_nearest_level(supports, current, side="below", min_strength=2)
+    trigger_level = _find_best_entry_level(
+        supports, current, atr, high_24h, low_24h,
+        side="below", strategy_type="pullback_long",
+    )
     if trigger_level is None:
         return None
 
@@ -202,6 +295,11 @@ def _build_pullback_long(
     invalidation_price = sl_level.price if sl_level else trigger * 0.98
     invalidation = f"价格跌破${invalidation_price:.0f}则策略失效"
 
+    quality = _calc_entry_quality(
+        trigger, current, atr, high_24h, low_24h,
+        trigger_level.strength, "long", "pullback_long",
+    )
+
     return ConditionalStrategy(
         strategy_type="pullback_long",
         label="回调做多",
@@ -212,7 +310,7 @@ def _build_pullback_long(
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
-        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength, quality),
         sl_source=f"{trigger_level.source}下方ATR×1.5",
         tp1_source=_level_source_label(resistances, tp1),
         reasoning=f"在{trigger_level.source}支撑位${trigger:.0f}附近挂买单，止损${stop_loss:.0f}",
@@ -221,17 +319,22 @@ def _build_pullback_long(
         tp_mode="hybrid",
         rr_at_trigger=rr_trigger,
         trigger_strength=trigger_level.strength,
+        entry_quality=quality,
     )
 
 
 def _build_bounce_short(
     current: float, confidence: float, levels: KeyLevels, atr: float,
+    high_24h: float = 0.0, low_24h: float = 0.0,
 ) -> ConditionalStrategy | None:
-    """反弹做空：在阻力位挂卖单。"""
+    """反弹做空：在入场质量最高的阻力位挂卖单。"""
     supports = levels.supports
     resistances = levels.resistances
 
-    trigger_level = _find_nearest_level(resistances, current, side="above", min_strength=2)
+    trigger_level = _find_best_entry_level(
+        resistances, current, atr, high_24h, low_24h,
+        side="above", strategy_type="bounce_short",
+    )
     if trigger_level is None:
         return None
 
@@ -264,6 +367,11 @@ def _build_bounce_short(
     invalidation_price = sl_level.price if sl_level else trigger * 1.02
     invalidation = f"价格放量突破${invalidation_price:.0f}则策略失效"
 
+    quality = _calc_entry_quality(
+        trigger, current, atr, high_24h, low_24h,
+        trigger_level.strength, "short", "bounce_short",
+    )
+
     return ConditionalStrategy(
         strategy_type="bounce_short",
         label="反弹做空",
@@ -274,7 +382,7 @@ def _build_bounce_short(
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
-        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength),
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", trigger_level.strength, quality),
         sl_source=f"{trigger_level.source}上方ATR×1.5",
         tp1_source=_level_source_label(supports, tp1),
         reasoning=f"在{trigger_level.source}阻力位${trigger:.0f}附近挂卖单，止损${stop_loss:.0f}",
@@ -283,11 +391,13 @@ def _build_bounce_short(
         tp_mode="hybrid",
         rr_at_trigger=rr_trigger,
         trigger_strength=trigger_level.strength,
+        entry_quality=quality,
     )
 
 
 def _build_breakout_long(
     current: float, confidence: float, levels: KeyLevels, atr: float,
+    high_24h: float = 0.0, low_24h: float = 0.0,
 ) -> ConditionalStrategy | None:
     """突破追多：在最近阻力上方设条件买单。"""
     resistances = levels.resistances
@@ -320,6 +430,11 @@ def _build_breakout_long(
 
     invalidation = f"突破后回落至${target_level.price:.0f}下方则为假突破"
 
+    quality = _calc_entry_quality(
+        trigger, current, atr, high_24h, low_24h,
+        target_level.strength, "long", "breakout_long",
+    )
+
     return ConditionalStrategy(
         strategy_type="breakout_long",
         label="突破追多",
@@ -330,7 +445,7 @@ def _build_breakout_long(
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
-        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength, quality),
         sl_source=f"{target_level.source}(突破后变支撑)",
         tp1_source=_level_source_label(resistances[1:], tp1) if len(resistances) >= 2 else "ATR等距目标",
         reasoning=f"突破{target_level.source}阻力${target_level.price:.0f}后追多",
@@ -339,11 +454,13 @@ def _build_breakout_long(
         tp_mode="hybrid",
         rr_at_trigger=rr_fixed,
         trigger_strength=target_level.strength,
+        entry_quality=quality,
     )
 
 
 def _build_breakout_short(
     current: float, confidence: float, levels: KeyLevels, atr: float,
+    high_24h: float = 0.0, low_24h: float = 0.0,
 ) -> ConditionalStrategy | None:
     """突破追空：在最近支撑下方设条件卖单。"""
     supports = levels.supports
@@ -374,6 +491,11 @@ def _build_breakout_short(
 
     invalidation = f"跌破后反弹回${target_level.price:.0f}上方则为假跌破"
 
+    quality = _calc_entry_quality(
+        trigger, current, atr, high_24h, low_24h,
+        target_level.strength, "short", "breakout_short",
+    )
+
     return ConditionalStrategy(
         strategy_type="breakout_short",
         label="突破追空",
@@ -384,7 +506,7 @@ def _build_breakout_short(
         take_profit_1=round(tp1, 2),
         take_profit_2=round(tp2, 2),
         risk_reward=rr_fixed,
-        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength),
+        position_size=_determine_position_size(rr_fixed, confidence, "hybrid", target_level.strength, quality),
         sl_source=f"{target_level.source}(跌破后变阻力)",
         tp1_source=_level_source_label(supports[1:], tp1) if len(supports) >= 2 else "ATR等距目标",
         reasoning=f"跌破{target_level.source}支撑${target_level.price:.0f}后追空",
@@ -393,6 +515,7 @@ def _build_breakout_short(
         tp_mode="hybrid",
         rr_at_trigger=rr_fixed,
         trigger_strength=target_level.strength,
+        entry_quality=quality,
     )
 
 
@@ -457,17 +580,22 @@ def _level_source_label(levels: list[KeyLevel], target_price: float) -> str:
 
 def _determine_position_size(
     risk_reward: float, confidence: float, tp_mode: str = "hybrid",
-    level_strength: str = "medium",
+    level_strength: str = "medium", entry_quality: float = 50.0,
 ) -> PositionSize:
-    """根据盈亏比和信心度连续计算仓位。"""
-    min_rr = MIN_RISK_REWARD_HYBRID if tp_mode == "hybrid" else MIN_RISK_REWARD_RATIO
-    if risk_reward < min_rr:
+    """根据入场质量 + 盈亏比 + 信心度综合计算仓位。
+
+    入场质量低于硬底线 → SKIP（策略层拦截）；
+    其他情况由 quality + R:R + confidence 共同决定仓位大小。
+    R:R 不再是准入门槛，只是仓位权重因子。
+    """
+    if entry_quality < MIN_ENTRY_QUALITY_HARD:
         return PositionSize.SKIP
 
-    rr_factor = min(risk_reward / 2.0, 2.0)
+    rr_factor = max(0.5, min(risk_reward / 1.5, 2.0))
+    quality_factor = min(entry_quality / 60.0, 1.5)
     conf_factor = confidence / 70.0
 
-    composite = rr_factor * conf_factor
+    composite = rr_factor * quality_factor * conf_factor
     if tp_mode == "hybrid":
         composite *= HYBRID_TREND_MULTIPLIER
     if level_strength == "critical":
@@ -556,6 +684,7 @@ def _replace_strategy(s: ConditionalStrategy, **kwargs) -> ConditionalStrategy:
         "market_state": s.market_state,
         "rr_at_trigger": s.rr_at_trigger,
         "trigger_strength": s.trigger_strength,
+        "entry_quality": s.entry_quality,
     }
     fields.update(kwargs)
     return ConditionalStrategy(**fields)

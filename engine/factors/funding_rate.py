@@ -57,7 +57,26 @@ class FundingRateFactor(ScoreFactor):
             if spread > 0.0003:
                 details_parts.append(f"两所差异{spread * 100:.4f}%(异常)")
 
-        # ── 3. 期现基差 / Premium（±3 分）──
+        # ── 3. 费率趋势（±3 分）── 连续负费率=空头拥挤=不易崩盘，连续正=多头拥挤=警惕
+        neg_days = fr.consecutive_negative_days
+        pos_days = fr.consecutive_positive_days
+        if neg_days >= 7:
+            score += 3
+            details_parts.append(f"连续负费率{neg_days}天(空头付费,多头有利+3)")
+        elif neg_days >= 5:
+            score += 2
+            details_parts.append(f"连续负费率{neg_days}天(空头承压+2)")
+        elif neg_days >= 3:
+            score += 1
+            details_parts.append(f"连续负费率{neg_days}天(+1)")
+        elif pos_days >= 5:
+            score -= 3
+            details_parts.append(f"连续正费率{pos_days}天(多头拥挤⚠️-3)")
+        elif pos_days >= 3:
+            score -= 2
+            details_parts.append(f"连续正费率{pos_days}天(多头付费-2)")
+
+        # ── 4. 期现基差 / Premium（±3 分）──
         # 正基差（升水）= 合约 > 现货 = 市场偏多情绪
         # 但作为反向指标：升水过高 → 过热 → 扣分；贴水 → 恐慌 → 加分
         basis = fr.basis_rate

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.schema import ExecutorConfig
-from core.constants import MIN_RISK_REWARD_HYBRID, SignalStrength
+from core.constants import SignalStrength
 from core.time_utils import now_beijing
 from executor.exchange_client import ExchangeClient
 from executor.models import OrderRecord, OrderStatus, PendingStrategy, RiskRejectReason
@@ -150,9 +150,8 @@ class ExecutionEngine:
         best_new: dict[str, float] = {}
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
-            rr = max(s.risk_reward, s.rr_at_trigger)
-            if side not in best_new or rr > best_new[side]:
-                best_new[side] = rr
+            if side not in best_new or s.entry_quality > best_new[side]:
+                best_new[side] = s.entry_quality
 
         for s in report.trade_plan.strategies:
             side = "buy" if s.strategy_type in ("pullback_long", "breakout_long") else "sell"
@@ -165,32 +164,31 @@ class ExecutionEngine:
                 logger.debug("跳过 %s %s: 本轮已有同方向单", symbol, s.strategy_type)
                 continue
 
-            # ── 限价单智能对比（只用本方向最优新策略的 R:R 对比） ──
+            # ── 限价单智能对比（用入场质量对比） ──
             if side in existing_limits:
                 old = existing_limits[side]
-                old_rr = old.get("rr_at_trigger", 0)
-                new_best_rr = best_new.get(side, 0)
+                old_quality = old.get("entry_quality", 0)
+                new_best_quality = best_new.get(side, 0)
 
-                if new_best_rr > old_rr:
+                if new_best_quality > old_quality:
                     logger.info(
-                        "新信号优于旧限价单 [%s] %s: R:R %.2f→%.2f，替换",
-                        symbol, side, old_rr, new_best_rr,
+                        "新信号优于旧限价单 [%s] %s: quality %.0f→%.0f，替换",
+                        symbol, side, old_quality, new_best_quality,
                     )
-                    await self._cancel_limit_order(old["strat_id"], f"新信号R:R更优({old_rr:.2f}→{new_best_rr:.2f})")
+                    await self._cancel_limit_order(old["strat_id"], f"新信号质量更优({old_quality:.0f}→{new_best_quality:.0f})")
                     del existing_limits[side]
                 else:
                     logger.info(
-                        "旧限价单更优 [%s] %s: 旧R:R=%.2f >= 新最优R:R=%.2f，保留旧单",
-                        symbol, side, old_rr, new_best_rr,
+                        "旧限价单更优 [%s] %s: 旧quality=%.0f >= 新=%.0f，保留旧单",
+                        symbol, side, old_quality, new_best_quality,
                     )
                     placed_sides.add(side)
                     continue
 
-            effective_rr = max(s.risk_reward, s.rr_at_trigger)
-            if effective_rr < MIN_RISK_REWARD_HYBRID:
+            if s.entry_quality < self._config.min_entry_quality:
                 continue
 
-            # ── 反方向：R:R 达标后才取消对侧旧限价单 ──
+            # ── 反方向：入场质量达标后才取消对侧旧限价单 ──
             opposite = "sell" if side == "buy" else "buy"
             if opposite in existing_limits:
                 old_opp = existing_limits.pop(opposite)
@@ -205,7 +203,7 @@ class ExecutionEngine:
                     registered += 1
                     placed_sides.add(side)
             else:
-                if s.risk_reward < self._config.min_risk_reward:
+                if s.entry_quality < self._config.min_entry_quality:
                     continue
                 self._register_pending(s, report, side, now)
                 registered += 1
@@ -404,11 +402,12 @@ class ExecutionEngine:
                 "trailing_callback_pct": s.trailing_callback_pct,
                 "tp1_close_ratio": s.tp1_close_ratio,
                 "rr_at_trigger": s.rr_at_trigger,
+                "entry_quality": s.entry_quality,
             }
             logger.info(
-                "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R=%.2f",
+                "限价单已挂出 [%s] %s %s qty=%.4f @ %.2f | SL=%.2f | R:R=%.2f | quality=%.0f",
                 report.symbol, s.strategy_type, side, amount, limit_price,
-                s.stop_loss, effective_rr,
+                s.stop_loss, effective_rr, s.entry_quality,
             )
             return True
         else:
@@ -707,6 +706,7 @@ class ExecutionEngine:
                     "trailing_callback_pct": order.get("trailing_callback_pct", 1.0),
                     "tp1_close_ratio": order.get("tp1_close_ratio", 0.5),
                     "rr_at_trigger": order.get("risk_reward", 0),
+                    "entry_quality": order.get("entry_quality", 50),
                 }
                 logger.info("恢复限价单(仍挂出) [%s] eid=%s", symbol, eid[:12])
             else:
@@ -844,6 +844,7 @@ class ExecutionEngine:
                         "tp2": s.take_profit_2,
                         "rr": s.risk_reward,
                         "rr_at_trigger": s.rr_at_trigger,
+                        "entry_quality": s.entry_quality,
                         "size": s.position_size.value,
                         "tp_mode": s.tp_mode,
                         "trailing_callback_pct": s.trailing_callback_pct,

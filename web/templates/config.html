@@ -329,6 +329,11 @@
                         <input type="number" name="executor.daily_loss_limit_pct" value="{{ config.executor.daily_loss_limit_pct }}" class="input" min="1" max="20" step="0.5">
                     </div>
                     <div class="form-group">
+                        <label>最低入场质量 (0-100)</label>
+                        <input type="number" id="p-min-quality" name="executor.min_entry_quality" value="{{ config.executor.min_entry_quality }}" class="input" min="0" max="100" step="5">
+                        <small style="color: #9ca3af; display:block; margin-top:2px;">综合区间位置+ATR距离+关键位强度，≥60优质，40-60一般</small>
+                    </div>
+                    <div class="form-group">
                         <label>最小下单金额 (USD)</label>
                         <input type="number" name="executor.min_order_usd" value="{{ config.executor.min_order_usd }}" class="input" min="5" max="500" step="1">
                     </div>
@@ -402,19 +407,22 @@
 /* ── 策略预设 ── */
 const PRESETS = {
     conservative: {
-        desc: '小资金积累，严格风控，低杠杆',
+        desc: '小资金积累，严格风控，只做优质位置',
         min_risk_reward: 2.0, min_confidence: 75, default_leverage: 2,
         light_position_pct: 5, normal_position_pct: 8, heavy_position_pct: 12,
+        min_entry_quality: 60,
     },
     balanced: {
         desc: '稳健滚仓，适合小资金（默认推荐）',
         min_risk_reward: 1.5, min_confidence: 65, default_leverage: 5,
         light_position_pct: 8, normal_position_pct: 15, heavy_position_pct: 25,
+        min_entry_quality: 40,
     },
     aggressive: {
         desc: '激进滚仓，强信号重仓出击',
         min_risk_reward: 1.2, min_confidence: 55, default_leverage: 10,
         light_position_pct: 10, normal_position_pct: 20, heavy_position_pct: 35,
+        min_entry_quality: 25,
     },
 };
 
@@ -431,6 +439,9 @@ function applyPreset(name) {
     document.getElementById('p-light').value = p.light_position_pct;
     document.getElementById('p-normal').value = p.normal_position_pct;
     document.getElementById('p-heavy').value = p.heavy_position_pct;
+    if (p.min_entry_quality !== undefined) {
+        document.getElementById('p-min-quality').value = p.min_entry_quality;
+    }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -438,7 +449,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const p = PRESETS[sel.value];
     document.getElementById('preset-desc').textContent = p ? p.desc : '自定义模式：手动调整下方参数';
 
-    document.querySelectorAll('#p-min-rr,#p-min-conf,#p-leverage,#p-light,#p-normal,#p-heavy').forEach(el => {
+    document.querySelectorAll('#p-min-rr,#p-min-conf,#p-leverage,#p-light,#p-normal,#p-heavy,#p-min-quality').forEach(el => {
         el.addEventListener('input', () => {
             sel.value = 'custom';
             document.getElementById('preset-desc').textContent = '自定义模式：手动调整下方参数';

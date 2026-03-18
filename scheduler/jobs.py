@@ -132,9 +132,7 @@ class JobScheduler:
     def _is_signal_actionable(self, report: SignalReport) -> bool:
         """根据配置的门槛判断信号是否可操作。
 
-        可操作条件（满足其一即可）：
-        1. 信心度达标 + 有策略R:R直接达标（position_size != skip）
-        2. 信心度达标 + 有策略触发价R:R达标（rr_at_trigger >= 1.0，可挂限价单）
+        可操作条件：信心度达标 + 至少一个策略入场质量达标。
         """
         threshold = self._config.general.actionable_min_confidence
         if report.confidence < threshold:
@@ -142,11 +140,9 @@ class JobScheduler:
         if not report.trade_plan:
             return False
 
-        from core.constants import MIN_RISK_REWARD_HYBRID
+        min_quality = self._config.executor.min_entry_quality
         for s in report.trade_plan.strategies:
-            if s.position_size.value != "skip":
-                return True
-            if s.rr_at_trigger >= MIN_RISK_REWARD_HYBRID:
+            if s.entry_quality >= min_quality:
                 return True
         return False
 
@@ -170,7 +166,7 @@ class JobScheduler:
         # 检查 1: 同一 trigger 价格 4h 内去重
         if report.trade_plan:
             for s in report.trade_plan.strategies:
-                if s.position_size.value == "skip" and s.rr_at_trigger < 1.0:
+                if s.entry_quality < self._config.executor.min_entry_quality:
                     continue
                 trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
                 cache_key = (symbol, trigger_key)
@@ -192,7 +188,7 @@ class JobScheduler:
 
         if report.trade_plan:
             for s in report.trade_plan.strategies:
-                if s.position_size.value == "skip" and s.rr_at_trigger < 1.0:
+                if s.entry_quality < self._config.executor.min_entry_quality:
                     continue
                 trigger_key = f"{s.strategy_type}_{s.trigger_price:.0f}"
                 self._trigger_dedup[(symbol, trigger_key)] = now
@@ -729,7 +725,9 @@ class JobScheduler:
                     elif report.confidence < threshold:
                         reason = f"信心度{report.confidence:.0f}% < 门槛{threshold:.0f}%"
                     elif report.trade_plan and report.trade_plan.strategies:
-                        reason = "所有策略盈亏比不足(含触发价R:R)"
+                        best_q = max(s.entry_quality for s in report.trade_plan.strategies)
+                        min_q = self._config.executor.min_entry_quality
+                        reason = f"入场质量不足(最优{best_q:.0f} < 门槛{min_q:.0f})"
                     else:
                         reason = "无可用策略"
                     logger.info(
@@ -873,7 +871,7 @@ class JobScheduler:
             return None
 
         bias_cn = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
-        size_cn = {"skip": "盈亏比不足", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
+        size_cn = {"skip": "待观察", "light": "轻仓", "normal": "标准", "heavy": "重仓"}
         sl = JobScheduler._SOURCE_LABELS
 
         strategies = []
@@ -899,6 +897,7 @@ class JobScheduler:
                 "trailing_callback_pct": s.trailing_callback_pct,
                 "tp1_close_ratio": s.tp1_close_ratio,
                 "rr_at_trigger": s.rr_at_trigger,
+                "entry_quality": s.entry_quality,
             })
 
         return {

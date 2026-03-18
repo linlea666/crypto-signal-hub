@@ -269,6 +269,10 @@
                     <span class="strategy-rr mono {{ 'text-bullish' if (s.get('risk_reward', 0) or 0) >= 2 else ('text-bearish' if (s.get('risk_reward', 0) or 0) < 1.5 else '') }}">
                         R:R {{ "%.1f"|format(s.get('risk_reward', 0) or 0) }}:1
                     </span>
+                    {% set eq = s.get('entry_quality', 0) or 0 %}
+                    <span class="strategy-rr mono {{ 'text-bullish' if eq >= 60 else ('text-bearish' if eq < 30 else '') }}" title="入场质量">
+                        Q:{{ "%.0f"|format(eq) }}
+                    </span>
                     <span class="strategy-position {{ 'skip' if is_skip else '' }}">{{ s.get('position_label', '') }}</span>
                 </div>
                 <div class="strategy-body">

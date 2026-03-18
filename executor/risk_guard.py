@@ -119,16 +119,13 @@ class RiskGuard:
     ) -> RiskCheckResult:
         """执行全部风控检查，返回结果"""
 
-        # 1. 盈亏比检查（hybrid 模式 R:R 已是真实值，门槛固定 1.0 与 trade_advisor 一致）
-        from core.constants import MIN_RISK_REWARD_HYBRID
-        min_rr = self._config.min_risk_reward
-        if getattr(strategy, "tp_mode", "fixed") == "hybrid":
-            min_rr = MIN_RISK_REWARD_HYBRID
-        if strategy.risk_reward < min_rr:
+        # 1. 盈亏比安全检查：只拒绝 R:R ≤ 0（数学错误），不再作为准入门槛
+        # 入场质量已在 executor/engine 层把关
+        if strategy.risk_reward <= 0:
             return RiskCheckResult(
                 passed=False,
                 reason=RiskRejectReason.LOW_RISK_REWARD,
-                detail=f"盈亏比 {strategy.risk_reward:.2f} < 门槛 {min_rr:.1f} (tp_mode={getattr(strategy, 'tp_mode', 'fixed')})",
+                detail=f"盈亏比 {strategy.risk_reward:.2f} ≤ 0（SL/TP设置异常）",
             )
 
         # 2. 获取账户信息

@@ -4,7 +4,7 @@
 - 纳斯达克 / 标普 500 / 美元指数 (DXY)  ← ifnews 全球股市接口
 - VIX 恐慌指数                            ← 新浪财经
 - 美国 10 年期国债收益率                    ← 新浪债券
-- COMEX 黄金价格（避险情绪参考）            ← CME Group
+- COMEX 黄金价格（避险情绪参考）            ← 新浪财经期货
 - 加密恐惧贪婪指数                          ← alternative.me
 - BTC ETF 资金流                            ← 预留接口
 """
@@ -25,7 +25,7 @@ IFNEWS_URL = "http://worldmap.ifnews.com/chinamap/china/financialData?type=all"
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 SINA_VIX_URL = "https://gi.finance.sina.com.cn/hq/min?symbol=VIX"
 SINA_US10Y_URL = "https://bond.finance.sina.com.cn/hq/gb/min?symbol=us10yt"
-CME_GOLD_URL = "https://www.cmegroup.com/CmeWS/mvc/quotes/v2/437"
+SINA_GOLD_URL = "https://hq.sinajs.cn/list=hf_GC"
 
 _IFNEWS_NAME_MAP = {
     "纳斯达克指数": "nasdaq",
@@ -34,9 +34,8 @@ _IFNEWS_NAME_MAP = {
 }
 
 _CACHE_TTL = 300  # 缓存 5 分钟
-_CME_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+_SINA_HQ_HEADERS = {
+    "Referer": "https://finance.sina.com.cn",
 }
 
 
@@ -66,7 +65,7 @@ class MacroCollector(DataCollector):
         etf_flow = await self._fetch_etf_flow()
         vix = await self._fetch_vix_sina()
         us10y = await self._fetch_us10y_sina()
-        gold = await self._fetch_gold_cme()
+        gold = await self._fetch_gold_sina()
 
         now = time.monotonic()
         data_age_hours = (now - self._ifnews_cache_ts) / 3600 if self._ifnews_cache_ts > 0 else 0.0
@@ -141,31 +140,37 @@ class MacroCollector(DataCollector):
             logger.warning("新浪 10Y 国债获取失败: %s", e)
         return self._us10y_cache or {}
 
-    # ── CME 黄金 ──
+    # ── 新浪黄金期货 (COMEX) ──
 
-    async def _fetch_gold_cme(self) -> dict:
+    async def _fetch_gold_sina(self) -> dict:
+        """从新浪财经获取 COMEX 黄金主力合约价格。
+
+        hf_GC 返回格式：var hq_str_hf_GC="当前价,,开盘,最高,...,昨收,...";
+        """
         now = time.monotonic()
         if self._gold_cache and (now - self._gold_cache_ts) < _CACHE_TTL:
             return self._gold_cache
         try:
-            ts = str(int(time.time() * 1000))
-            async with httpx.AsyncClient(timeout=10, headers=_CME_HEADERS) as client:
-                resp = await client.get(CME_GOLD_URL, params={"isProtected": "", "_t": ts})
+            async with httpx.AsyncClient(timeout=10, headers=_SINA_HQ_HEADERS) as client:
+                resp = await client.get(SINA_GOLD_URL)
                 resp.raise_for_status()
-                data = resp.json()
-            quotes = data.get("quotes", [])
-            for q in quotes:
-                if q.get("isFrontMonth"):
-                    price = self._safe_float(q.get("last"))
-                    pct_str = (q.get("percentageChange") or "").replace("%", "").replace("+", "")
-                    change_pct = self._safe_float(pct_str) or 0.0
-                    if price:
-                        result = {"price": round(price, 2), "change_pct": round(change_pct, 2)}
+                text = resp.text
+            parts = text.split('"')
+            if len(parts) >= 2:
+                fields = parts[1].split(",")
+                if len(fields) >= 8:
+                    price = self._safe_float(fields[0])
+                    prev_close = self._safe_float(fields[7])
+                    if price and price > 0:
+                        change_pct = 0.0
+                        if prev_close and prev_close > 0:
+                            change_pct = round((price - prev_close) / prev_close * 100, 2)
+                        result = {"price": round(price, 2), "change_pct": change_pct}
                         self._gold_cache = result
                         self._gold_cache_ts = now
                         return result
         except Exception as e:
-            logger.warning("CME 黄金获取失败: %s", e)
+            logger.warning("新浪黄金获取失败: %s", e)
         return self._gold_cache or {}
 
     # ── 原有采集方法 ──

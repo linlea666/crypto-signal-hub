@@ -79,9 +79,12 @@ class SignalScorer:
         # 1. 逐因子评分（按配置权重加权）
         factor_scores = self._calculate_all_factors(snapshot)
 
-        # 2. 汇总得分
+        # 2. 汇总得分（动态排除数据不可用的因子满分）
         total_score = sum(fs.score for fs in factor_scores)
-        max_possible = sum(fs.max_score for fs in factor_scores)
+        max_possible = sum(
+            fs.max_score for fs in factor_scores
+            if not self._is_factor_unavailable(fs)
+        )
 
         # 3. 判断方向（动态阈值：满分的 8%）
         direction = self._determine_direction(total_score, max_possible)
@@ -170,6 +173,14 @@ class SignalScorer:
                     details=f"评分异常: {e}",
                 ))
         return results
+
+    @staticmethod
+    def _is_factor_unavailable(fs) -> bool:
+        """判断因子是否因数据缺失而无效（score=0 且 details 明确标注）。"""
+        if fs.score != 0:
+            return False
+        unavail_keywords = ("不可用", "不足", "数据质量")
+        return any(kw in fs.details for kw in unavail_keywords)
 
     @staticmethod
     def _determine_direction(

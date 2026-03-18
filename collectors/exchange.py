@@ -441,8 +441,13 @@ class ExchangeCollector(DataCollector):
         # 期现基差：OKX funding-rate 接口的 premium 字段（CCXT 丢弃了该字段）
         basis = await self._fetch_basis_from_okx(symbol)
 
+        # 资金费率趋势：连续正/负天数
+        neg_days, pos_days = await self._calc_funding_trend(symbol)
+
         return FundingRateData(
             rates=rates, average=avg, level=level, basis_rate=basis,
+            consecutive_negative_days=neg_days,
+            consecutive_positive_days=pos_days,
         )
 
     @staticmethod
@@ -456,6 +461,50 @@ class ExchangeCollector(DataCollector):
         if rate < -0.0005:
             return FundingRateLevel.LOW
         return FundingRateLevel.NORMAL
+
+    async def _calc_funding_trend(self, symbol: str) -> tuple[int, int]:
+        """计算连续负/正费率天数。
+
+        通过 OKX 历史费率接口获取最近 30 天（约 90 条 8h 记录），
+        从最新向前扫描，统计连续同方向天数。
+        BTC 每 8h 结算一次，3 条同方向 ≈ 1 天。
+        """
+        base = symbol.split("/")[0]
+        inst_id = f"{base}-USDT-SWAP"
+        url = "https://www.okx.com/api/v5/public/funding-rate-history"
+        params = {"instId": inst_id, "limit": "90"}
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+            records = data.get("data", [])
+            if not records:
+                return 0, 0
+
+            neg_count, pos_count = 0, 0
+            for rec in records:
+                rate = float(rec.get("fundingRate", 0))
+                if rate < 0:
+                    if pos_count > 0:
+                        break
+                    neg_count += 1
+                elif rate > 0:
+                    if neg_count > 0:
+                        break
+                    pos_count += 1
+                else:
+                    break
+
+            neg_days = neg_count // 3
+            pos_days = pos_count // 3
+            return neg_days, pos_days
+
+        except Exception as e:
+            logger.debug("获取费率趋势失败 %s: %s", symbol, e)
+            return 0, 0
 
     async def _fetch_open_interest(
         self, symbol: str, price_change_pct: float
