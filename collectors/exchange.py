@@ -188,7 +188,7 @@ class ExchangeCollector(DataCollector):
         vwap_val = self._calculate_vwap(df)
         volume_ratio = self._calculate_volume_ratio(df["volume"])
         macd_hist, macd_cross = self._calculate_macd(close)
-        bb_pct = self._calculate_bollinger(close)
+        bb_pct, bb_bw = self._calculate_bollinger(close)
 
         # ── Volume Profile：从 4h K 线计算成交量分布 ──
         vp_levels = self._calculate_volume_profile(df)
@@ -209,6 +209,7 @@ class ExchangeCollector(DataCollector):
             macd_histogram=macd_hist,
             macd_cross=macd_cross,
             bb_percent=bb_pct,
+            bb_bandwidth=bb_bw,
             daily_close_strength=daily_strength,
             daily_close_vs_ma20=daily_vs_ma,
             volume_profile_levels=vp_levels,
@@ -275,26 +276,29 @@ class ExchangeCollector(DataCollector):
         return round(float(current), 2), cross
 
     @staticmethod
-    def _calculate_bollinger(close: pd.Series) -> float | None:
-        """计算布林带 %B 指标。
+    def _calculate_bollinger(close: pd.Series) -> tuple[float | None, float | None]:
+        """计算布林带 %B 和带宽指标。
 
         %B = (价格 - 下轨) / (上轨 - 下轨)
-        >1 = 突破上轨（超买/强势突破）
-        <0 = 跌破下轨（超卖/弱势破位）
-        0.5 = 中轨附近
+        Bandwidth = (上轨 - 下轨) / 中轨 × 100 (%)
+
+        返回 (percent_b, bandwidth)。
         """
         if len(close) < 20:
-            return None
+            return None, None
 
         bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
         upper = bb.bollinger_hband().iloc[-1]
         lower = bb.bollinger_lband().iloc[-1]
+        mid = bb.bollinger_mavg().iloc[-1]
 
-        if pd.isna(upper) or pd.isna(lower) or upper == lower:
-            return None
+        if pd.isna(upper) or pd.isna(lower) or pd.isna(mid) or upper == lower or mid == 0:
+            return None, None
 
         price = close.iloc[-1]
-        return round(float((price - lower) / (upper - lower)), 3)
+        pct_b = round(float((price - lower) / (upper - lower)), 3)
+        bandwidth = round(float((upper - lower) / mid * 100), 3)
+        return pct_b, bandwidth
 
     @staticmethod
     def _calculate_volume_profile(df: pd.DataFrame) -> list[float]:

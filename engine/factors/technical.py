@@ -139,9 +139,17 @@ class TechnicalFactor(ScoreFactor):
                 score -= 1
                 details_parts.append(f"MACD空头动量(柱状{hist:+.1f},-1)")
 
-        # ── 8. 布林带位置（±2 分）──
+        # ── 8. 布林带（%B + 带宽联合评分，±2 分）──
         if tech.bb_percent is not None:
             bb = tech.bb_percent
+            bw = tech.bb_bandwidth
+            bw_tag = ""
+            if bw is not None:
+                if bw < 2.0:
+                    bw_tag = "压缩"
+                elif bw > 5.0:
+                    bw_tag = "扩张"
+
             if bb > 1.0:
                 if ma_direction > 0:
                     score += 2
@@ -156,8 +164,19 @@ class TechnicalFactor(ScoreFactor):
                 else:
                     score += 1
                     details_parts.append(f"触及布林下轨%B={bb:.2f}(超卖+1)")
+            elif bb > 0.8 and bw and bw > 3.0 and ma_direction > 0:
+                score += 1
+                details_parts.append(f"沿上轨运行%B={bb:.2f}(Band Walk+1)")
+            elif bb < 0.2 and bw and bw > 3.0 and ma_direction < 0:
+                score -= 1
+                details_parts.append(f"沿下轨运行%B={bb:.2f}(Band Walk-1)")
             elif 0.4 <= bb <= 0.6:
                 details_parts.append(f"布林中轨附近%B={bb:.2f}")
+            else:
+                details_parts.append(f"%B={bb:.2f}")
+
+            if bw is not None:
+                details_parts.append(f"带宽{bw:.1f}%({bw_tag})" if bw_tag else f"带宽{bw:.1f}%")
 
         # ── 9. 日线收盘强度（±1 分，趋势确认） ──
         if tech.daily_close_strength is not None:

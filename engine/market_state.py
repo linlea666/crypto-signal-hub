@@ -67,7 +67,15 @@ def _is_strong_trend(
     confidence: float,
     tech: TechnicalData,
 ) -> bool:
-    """强趋势门槛提高（从 |15|+70% 提高到 |20|+75%+量能确认）。"""
+    """强趋势门槛提高（从 |15|+70% 提高到 |20|+75%+量能确认）。
+
+    布林带宽度极低（<2%=压缩）时否决强趋势判定，
+    因为低波动不支持趋势延续假设。
+    """
+    # 布林带压缩时否决强趋势（波动率太低不可能是强趋势）
+    if tech.bb_bandwidth is not None and tech.bb_bandwidth < 2.0:
+        return False
+
     abs_score = abs(total_score)
     vol_ratio = tech.volume_ratio or 0
 
@@ -79,6 +87,11 @@ def _is_strong_trend(
 
     if abs_score > 18 and confidence > 80 and vol_ratio > 1.2:
         return True
+
+    # 布林带扩张 + 高评分 → 降低量能要求
+    if tech.bb_bandwidth is not None and tech.bb_bandwidth > 5.0:
+        if abs_score > 18 and confidence > 72:
+            return True
 
     return False
 
@@ -93,6 +106,7 @@ def _is_trend_weakening(
     - 评分方向一致（|score| > 12）但量能萎缩（volume_ratio < 0.5）
     - 或评分方向一致但 RSI 进入回拉区域
     - 或 MA 交叉刚发生（趋势可能转折）
+    - 或布林带从扩张转压缩（带宽下降 = 趋势动能衰减）
     """
     abs_score = abs(total_score)
     vol_ratio = tech.volume_ratio or 1.0
@@ -107,6 +121,10 @@ def _is_trend_weakening(
             return True
 
     if abs_score > 10 and tech.ma_cross in ("golden", "death"):
+        return True
+
+    # 布林带压缩 + 方向一致 → 趋势可能在衰减（波动率收窄）
+    if abs_score > 10 and tech.bb_bandwidth is not None and tech.bb_bandwidth < 2.0:
         return True
 
     return False
